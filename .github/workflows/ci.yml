@@ -27,7 +27,12 @@ jobs:
       - run: npm run build:shared
       - run: npx playwright install --with-deps chromium
         working-directory: packages/e2e
-      - run: npm run gate:required
+      # Cleanup contracts inspect /proc. Keep their real OS permission check;
+      # an unreadable process must continue to block cleanup in the product.
+      - name: Server and integration contracts
+        run: sudo env "PATH=$PATH" "HOME=$HOME" node scripts/run-contract-tests.cjs
+      - name: Builds and browser tests
+        run: node scripts/run-required-gate.cjs
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
