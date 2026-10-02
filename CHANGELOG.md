@@ -1,5 +1,14 @@
 # Changelog / 更新记录
 
+## 0.1.0-preview.3 — 2026-10-03
+
+- Always reachable Chinese/English getting-started guide with the selected repository, real integration progress and direct next-step links.
+- Load the existing two-task example into the editor for confirmation, without an automatic model call or task publication.
+- Localize the workbench's embedded execution controls, event categories, copy feedback and failure guidance while preserving model output.
+- Extend the existing onboarding browser flow to cover guide navigation, explicit import confirmation and both detail-panel languages.
+
+常驻中英使用指引显示真实项目进度；两任务示例先填入编辑区、确认后发布。工作台执行详情的主要操作、记录分类与失败说明跟随语言切换，模型原文保持原样。
+
 ## 0.1.0-preview.2 — 2026-10-03
 
 - Give Linux worktree cleanup contracts the process visibility required by their safety checks.

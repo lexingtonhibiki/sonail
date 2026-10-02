@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';import Markdown from 'react-markdown';
 import {
   X,
@@ -29,6 +29,16 @@ import { getAgentDisplay } from '@/lib/agent-config';
 import { TerminalView } from './TerminalView';
 import { api, connectWS } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+type Translate = (zh: string, en: string) => string;
+const english: Translate = (_zh, en) => en;
+const PanelTranslation = createContext<Translate>(english);
+const eventLabelsZh: Record<AgentEventType, string> = {
+  thinking: '思考', tool_call: '工具调用', file_read: '读取文件',
+  file_write: '写入文件', file_edit: '编辑文件', command: '执行命令',
+  command_output: '命令输出', output: '输出', test_result: '测试结果',
+  error: '错误', complete: '完成',
+};
 
 const eventIconMap: Record<AgentEventType, React.ElementType> = {
   thinking: Brain,
@@ -223,9 +233,11 @@ interface AgentPanelProps {
   onCleanupWorktree?: (id: string) => Promise<void>;
   onReconfigureRetry?: (id: string) => void;
   theme?: 'dark' | 'light';
+  translate?: Translate;
 }
 
 function CopyButton({ text }: { text: string }) {
+  const t = useContext(PanelTranslation);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => { clearTimeout(timerRef.current); }, []);
@@ -241,6 +253,8 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
+      aria-label={copied ? t('已复制', 'Copied') : t('复制内容', 'Copy content')}
+      title={copied ? t('已复制', 'Copied') : t('复制内容', 'Copy content')}
       className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:h-6 lg:w-6"
     >
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -249,13 +263,14 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function EventItem({ event }: { event: CoalescedEvent }) {
+  const t = useContext(PanelTranslation);
   // Thinking events default to collapsed; everything else expanded
   const [expanded, setExpanded] = useState(event.type !== 'thinking');
   const Icon = eventIconMap[event.type];
   const color = eventColorMap[event.type];
   const label = event.toolLabel
     ? event.toolLabel.charAt(0).toUpperCase() + event.toolLabel.slice(1)
-    : eventLabelMap[event.type];
+    : t(eventLabelsZh[event.type], eventLabelMap[event.type]);
 
   const hasDiff = event.metadata?.diff;
   const hasFile = event.metadata?.file;
@@ -427,7 +442,8 @@ function EventItem({ event }: { event: CoalescedEvent }) {
   );
 }
 
-export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLocal, onCleanupWorktree, onReconfigureRetry, theme }: AgentPanelProps) {
+export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLocal, onCleanupWorktree, onReconfigureRetry, theme, translate = english }: AgentPanelProps) {
+  const t = translate;
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [prUrl, setPrUrl] = useState<string | null>(null);
@@ -627,7 +643,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
   };
 
   return (
-    <AnimatePresence>
+    <PanelTranslation.Provider value={t}><AnimatePresence>
       {task && (
         <>
           {/* Backdrop overlay — click to close */}
@@ -685,24 +701,21 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                     <span className="relative flex h-1.5 w-1.5">
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
                       <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
-                    </span>
-                    Active
+                    </span>{t("运行中", "Active")}
                   </span>
                 )}
                 {task.agentStatus === 'complete' && (
                   <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Complete
+                    <CheckCircle2 className="h-3 w-3" />{t("已完成", "Complete")}
                   </span>
                 )}
                 {task.agentStatus === 'failed' && (
                   <span className="flex items-center gap-1 text-[10px] text-red-600 dark:text-red-400">
-                    <AlertCircle className="h-3 w-3" />
-                    Failed
+                    <AlertCircle className="h-3 w-3" />{t("失败", "Failed")}
                   </span>
                 )}
                 <span className="text-[10px] text-muted-foreground">
-                  {events.length} events
+                  {events.length} {t("条记录", "events")}
                 </span>
               </div>
             </div>
@@ -712,7 +725,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 <button
                   onClick={() => onRun(task.id)}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors lg:h-9 lg:w-9"
-                  title={task.agentStatus === 'failed' ? 'Retry agent' : 'Run agent'}
+                  title={task.agentStatus === 'failed' ? t("重试执行", "Retry agent") : t("启动执行", "Run agent")}
                 >
                   {task.agentStatus === 'failed' ? <RotateCw className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 </button>
@@ -721,17 +734,16 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 <button
                   onClick={() => onReconfigureRetry(task.id)}
                   className="flex h-11 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-muted px-3 text-xs font-medium text-amber-500 dark:text-amber-400 hover:bg-amber-500/20 transition-colors lg:h-9"
-                  title="Reconfigure and retry"
+                  title={t("调整配置并重试", "Reconfigure and retry")}
                 >
-                  <Cog className="h-3.5 w-3.5" />
-                  Reconfigure
+                  <Cog className="h-3.5 w-3.5" />{t("调整配置", "Reconfigure")}
                 </button>
               )}
               {isActive && onStop && (
                 <button
                   onClick={() => onStop(task.id)}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-red-500 dark:text-red-400 hover:bg-red-500/20 transition-colors lg:h-9 lg:w-9"
-                  title="Stop agent"
+                  title={t("停止执行", "Stop agent")}
                 >
                   <Square className="h-4 w-4" />
                 </button>
@@ -739,7 +751,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
               <button
                 onClick={onClose}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-foreground hover:bg-destructive hover:text-white hover:border-destructive transition-colors lg:h-9 lg:w-9"
-                title="Close panel (Esc)"
+                title={t("关闭详情（Esc）", "Close panel (Esc)")}
               >
                 <X className="h-5 w-5" strokeWidth={2.5} />
               </button>
@@ -759,9 +771,9 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 className="flex min-h-11 w-full items-center gap-2 px-4 py-2 text-left transition-colors hover:bg-accent/50 lg:min-h-0"
               >
                 <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span className="text-xs font-medium text-foreground">Task Description</span>
+                <span className="text-xs font-medium text-foreground">{t("任务说明", "Task Description")}</span>
                 <span className="text-[10px] text-muted-foreground ml-1">
-                  {task.description.length > 200 ? `${Math.round(task.description.length / 100) * 100}+ chars` : ''}
+                  {task.description.length > 200 ? `${Math.round(task.description.length / 100) * 100}+ ${t("字符", "chars")}` : ''}
                 </span>
                 {descExpanded
                   ? <ChevronDown className="ml-auto h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -801,7 +813,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
                 <GitBranch className="h-3 w-3 shrink-0 text-primary" />
                 <span className="min-w-0 break-all font-mono text-foreground">{task.branchName}</span>
-                <span className="text-muted-foreground/50">from</span>
+                <span className="text-muted-foreground/50">{t("基于", "from")}</span>
                 <span className="min-w-0 break-all font-mono">{task.baseBranch || 'main'}</span>
               </div>
               {task.worktreePath && (
@@ -822,7 +834,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                           const url = await onCreatePR(task.id);
                           if (url) setPrUrl(url);
                         } catch (err: unknown) {
-                          setPrError((err as Error).message || 'Failed to create PR');
+                          setPrError((err as Error).message || t("创建 PR 失败", "Failed to create PR"));
                         }
                         setPrLoading(false);
                       }}
@@ -830,7 +842,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                       className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border max-lg:min-h-11 border-border bg-muted px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
                     >
                       <ExternalLink className="h-3 w-3" />
-                      {prLoading ? 'Creating...' : 'Create PR'}
+                      {prLoading ? t("正在创建…", "Creating...") : t("创建 PR", "Create PR")}
                     </button>
                   )}
                   {prUrl && (
@@ -840,8 +852,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                       rel="noopener noreferrer"
                       className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border max-lg:min-h-11 border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                     >
-                      <ExternalLink className="h-3 w-3" />
-                      View PR
+                      <ExternalLink className="h-3 w-3" />{t("查看 PR", "View PR")}
                     </a>
                   )}
                   {!mergeResult && task.branchName && onMergeLocal && (
@@ -853,7 +864,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                           const branch = await onMergeLocal(task.id);
                           if (branch) setMergeResult(branch);
                         } catch (err: unknown) {
-                          setMergeError((err as Error).message || 'Failed to merge');
+                          setMergeError((err as Error).message || t("合入失败", "Failed to merge"));
                         }
                         setMergeLoading(false);
                       }}
@@ -861,13 +872,12 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                       className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border max-lg:min-h-11 border-border bg-muted px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
                     >
                       <GitMerge className="h-3 w-3" />
-                      {mergeLoading ? 'Merging...' : `Merge to ${task.baseBranch || 'main'}`}
+                      {mergeLoading ? t("正在合入…", "Merging...") : `${t('合入', 'Merge to')} ${task.baseBranch || 'main'}`}
                     </button>
                   )}
                   {mergeResult && (
                     <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border max-lg:min-h-11 border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
-                      <GitMerge className="h-3 w-3" />
-                      Merged to {mergeResult}
+                      <GitMerge className="h-3 w-3" />{t("已合入", "Merged to")} {mergeResult}
                     </span>
                   )}
                   {task.worktreePath && onCleanupWorktree && (
@@ -875,8 +885,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                       onClick={() => setShowWorktreeConfirm(true)}
                       className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border max-lg:min-h-11 border-border bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 transition-colors"
                     >
-                      <Trash2 className="h-3 w-3" />
-                      Clean up worktree
+                      <Trash2 className="h-3 w-3" />{t("清理工作树", "Clean up worktree")}
                     </button>
                   )}
                 </div>
@@ -889,16 +898,14 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
           )}
           {showWorktreeConfirm && (
             <div className="mx-4 my-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-              <p className="text-xs text-amber-200 font-medium mb-1">Delete worktree?</p>
-              <p className="text-xs text-amber-300/80 mb-3">
-                This removes the clean worktree directory and generated files. The branch and committed changes remain available for pushing or re-creating the worktree.
+              <p className="text-xs text-amber-200 font-medium mb-1">{t("删除工作树？", "Delete worktree?")}</p>
+              <p className="text-xs text-amber-300/80 mb-3">{t("这会删除干净的工作树目录及生成文件，分支和已提交的更改仍可推送或用于重新创建工作树。", "This removes the clean worktree directory and generated files. The branch and committed changes remain available for pushing or re-creating the worktree.")}
               </p>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowWorktreeConfirm(false)}
                   className="min-h-11 rounded px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700 lg:min-h-0"
-                >
-                  Cancel
+                >{t("取消", "Cancel")}
                 </button>
                 <button
                   onClick={() => {
@@ -906,8 +913,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                     if (task && onCleanupWorktree) onCleanupWorktree(task.id);
                   }}
                   className="min-h-11 rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-500 lg:min-h-0"
-                >
-                  Delete worktree
+                >{t("删除工作树", "Delete worktree")}
                 </button>
               </div>
             </div>
@@ -915,7 +921,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
 
           {task.agentStatus === 'failed' && (
             <FailureSummary
-              message={latestError?.content || 'The agent failed before it wrote an error log. Retry or reconfigure the task to capture the current failure reason.'}
+              message={latestError?.content || t("执行失败，尚未记录具体错误。请重试或调整配置后重新执行，以获取当前失败原因。", "The agent failed before it wrote an error log. Retry or reconfigure the task to capture the current failure reason.")}
             />
           )}
 
@@ -931,8 +937,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                     ? 'bg-card border border-border border-b-card text-foreground -mb-px'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
-              >
-                Summary
+              >{t("结果摘要", "Summary")}
               </button>
             )}
             <button
@@ -943,8 +948,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                   ? 'bg-card border border-border border-b-card text-foreground -mb-px'
                   : 'text-muted-foreground hover:text-foreground'
               )}
-            >
-              Events
+            >{t("执行记录", "Events")}
             </button>
             <button
               onClick={() => selectTab('terminal')}
@@ -954,8 +958,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                   ? 'bg-card border border-border border-b-card text-foreground -mb-px'
                   : 'text-muted-foreground hover:text-foreground'
               )}
-            >
-              Terminal
+            >{t("终端", "Terminal")}
             </button>
             <button
               onClick={() => selectTab('changes')}
@@ -965,8 +968,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                   ? 'bg-card border border-border border-b-card text-foreground -mb-px'
                   : 'text-muted-foreground hover:text-foreground'
               )}
-            >
-              Actions{fileChanges.length > 0 ? ` (${fileChanges.length})` : ''}
+            >{t("文件操作", "Actions")}{fileChanges.length > 0 ? ` (${fileChanges.length})` : ''}
             </button>
             </div>
             {events.length > 0 && (
@@ -984,10 +986,9 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                   URL.revokeObjectURL(url);
                 }}
                 className="flex shrink-0 items-center gap-1 px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors max-lg:min-h-11"
-                title="Download event log as markdown"
+                title={t("下载 Markdown 执行记录", "Download event log as markdown")}
               >
-                <Download className="h-3 w-3" />
-                Export
+                <Download className="h-3 w-3" />{t("导出", "Export")}
               </button>
             )}
           </div>
@@ -999,8 +1000,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 <>
                   {!completedSectionFilled && (
                     <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                      <AlertCircle className="h-4 w-4 shrink-0" />
-                      The required “Completed” section is empty or missing.
+                      <AlertCircle className="h-4 w-4 shrink-0" />{t("交付报告缺少必需的“Completed”章节或内容为空。", "The required “Completed” section is empty or missing.")}
                     </div>
                   )}
                   <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_h2]:mt-4 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h2:first-child]:mt-0">
@@ -1011,7 +1011,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 <div className="flex h-full items-center justify-center">
                   <div className="text-center">
                     <FileText className="mx-auto h-10 w-10 text-muted-foreground/20" />
-                    <p className="mt-3 text-sm text-muted-foreground/50">No summary was provided for this task.</p>
+                    <p className="mt-3 text-sm text-muted-foreground/50">{t("此任务尚无结果摘要。", "No summary was provided for this task.")}</p>
                   </div>
                 </div>
               )}
@@ -1032,7 +1032,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 <div className="flex h-full items-center justify-center">
                   <div className="text-center">
                     <FileCode2 className="mx-auto h-10 w-10 text-muted-foreground/20" />
-                    <p className="mt-3 text-sm text-muted-foreground/50">No actions yet</p>
+                    <p className="mt-3 text-sm text-muted-foreground/50">{t("尚无文件操作", "No actions yet")}</p>
                   </div>
                 </div>
               )}
@@ -1061,11 +1061,9 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
               <div className="flex h-full items-center justify-center p-4">
                 <div className="w-full rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-center">
                   <AlertCircle className="mx-auto h-10 w-10 text-red-500/80 dark:text-red-400/80" />
-                  <p className="mt-3 text-sm font-medium text-red-700 dark:text-red-300">
-                    Agent failed
+                  <p className="mt-3 text-sm font-medium text-red-700 dark:text-red-300">{t("执行失败", "Agent failed")}
                   </p>
-                  <p className="mt-1 text-xs leading-relaxed text-red-700/70 dark:text-red-300/70">
-                    This run did not record an error event. Use Reconfigure or Retry to run it again and capture details.
+                  <p className="mt-1 text-xs leading-relaxed text-red-700/70 dark:text-red-300/70">{t("本次运行尚未记录错误详情。请调整配置或重试，以获取具体原因。", "This run did not record an error event. Use Reconfigure or Retry to run it again and capture details.")}
                   </p>
                 </div>
               </div>
@@ -1075,11 +1073,9 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
               <div className="flex h-full items-center justify-center">
                 <div className="text-center">
                   <Brain className="mx-auto h-10 w-10 text-muted-foreground/20" />
-                  <p className="mt-3 text-sm text-muted-foreground/50">
-                    No agent activity yet
+                  <p className="mt-3 text-sm text-muted-foreground/50">{t("尚无执行记录", "No agent activity yet")}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground/30">
-                    Assign this task to start the agent
+                  <p className="mt-1 text-xs text-muted-foreground/30">{t("从任务卡启动执行后，这里会显示过程。", "Assign this task to start the agent")}
                   </p>
                 </div>
               </div>
@@ -1113,8 +1109,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                     className="h-1 w-1 rounded-full bg-primary"
                   />
                 </div>
-                <span className="text-[10px] text-muted-foreground">
-                  Agent is working...
+                <span className="text-[10px] text-muted-foreground">{t("正在执行…", "Agent is working...")}
                 </span>
               </motion.div>
             )}
@@ -1135,7 +1130,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                       type="button"
                       onClick={() => setFollowUpImages(prev => prev.filter((_, j) => j !== i))}
                       className="absolute -right-2 -top-2 flex h-11 w-11 items-center justify-center rounded-full text-white opacity-100 transition-opacity lg:h-6 lg:w-6 lg:opacity-0 lg:group-hover:opacity-100"
-                      aria-label={`Remove ${f.name}`}
+                      aria-label={`${t("移除", "Remove")} ${f.name}`}
                     >
                       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] leading-none">×</span>
                     </button>
@@ -1149,7 +1144,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 onClick={() => imageInputRef.current?.click()}
                 disabled={agentStatus !== 'executing' || sending}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed lg:h-8 lg:w-8"
-                title="Attach images"
+                title={t("添加图片", "Attach images")}
               >
                 <Paperclip className="h-3.5 w-3.5" />
               </button>
@@ -1176,7 +1171,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                     handleSendFollowUp();
                   }
                 }}
-                placeholder="Send a message to the agent..."
+                placeholder={t("给执行者发送补充说明…", "Send a message to the agent...")}
                 disabled={agentStatus !== 'executing' || sending}
                 className="h-11 min-w-0 flex-1 rounded-md border border-border bg-muted px-3 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40 disabled:cursor-not-allowed lg:h-auto lg:py-1.5"
               />
@@ -1184,7 +1179,7 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
                 onClick={handleSendFollowUp}
                 disabled={agentStatus !== 'executing' || sending || (!followUpMessage.trim() && followUpImages.length === 0)}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-primary hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed lg:h-8 lg:w-8"
-                title="Send message"
+                title={t("发送消息", "Send message")}
               >
                 <Send className="h-3.5 w-3.5" />
               </button>
@@ -1193,11 +1188,12 @@ export function AgentPanel({ task, onClose, onRun, onStop, onCreatePR, onMergeLo
         </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence></PanelTranslation.Provider>
   );
 }
 
 function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const t = useContext(PanelTranslation);
   return (
     <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm">
       <div className="flex items-start justify-between gap-2">
@@ -1205,28 +1201,27 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
         <button
           onClick={() => navigator.clipboard.writeText(message)}
           className="min-h-11 min-w-11 shrink-0 rounded px-2 py-1 text-[10px] text-red-400 hover:bg-red-500/20 lg:min-h-0 lg:min-w-0"
-        >
-          Copy
+        >{t("复制", "Copy")}
         </button>
       </div>
       <button
         onClick={onDismiss}
         className="mt-2 min-h-11 min-w-11 rounded text-[10px] text-zinc-300 hover:text-white lg:min-h-0 lg:min-w-0"
-      >
-        Dismiss
+      >{t("关闭", "Dismiss")}
       </button>
     </div>
   );
 }
 
 function FailureSummary({ message }: { message: string }) {
+  const t = useContext(PanelTranslation);
   return (
     <div className="shrink-0 border-b border-border px-4 py-3">
       <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
         <div className="flex items-start gap-2">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500 dark:text-red-400" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-red-700 dark:text-red-300">Agent failed</p>
+            <p className="text-xs font-semibold text-red-700 dark:text-red-300">{t("执行失败", "Agent failed")}</p>
             <p className="mt-1 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-red-700/80 dark:text-red-300/80">
               {message}
             </p>

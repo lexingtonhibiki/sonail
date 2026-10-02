@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
 import { API, prepareTestRepo } from './helpers';
 
 test('Sonail imports a manual plan, explains dependencies and switches language without a model call', async ({ page, request }) => {
@@ -11,9 +10,17 @@ test('Sonail imports a manual plan, explains dependencies and switches language 
     await page.goto('/workbench');
     await expect(page.getByLabel('选择项目')).toBeVisible();
     await page.getByLabel('选择项目').selectOption(project.id);
-    await page.getByRole('button', { name: '想法与规格', exact: true }).click();
-    await page.locator('summary').filter({ hasText: '手动导入 JSON' }).click();
-    await page.getByLabel('任务方案 JSON').fill(readFileSync('../../examples/demo.zh-CN.json', 'utf8'));
+    await page.getByRole('button', { name: '使用指引', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '不用懂代码，也能掌握项目进展', exact: true })).toBeVisible();
+    await expect(page.getByText(repoPath, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '配置角色', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '三个角色，分别配置', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '使用指引', exact: true }).click();
+    await page.getByRole('button', { name: '载入两任务示例', exact: true }).click();
+    await expect(page.getByLabel('任务方案 JSON')).toBeVisible();
+    expect(JSON.parse(await page.getByLabel('任务方案 JSON').inputValue()).tasks).toHaveLength(2);
+    const beforeImport = await (await request.get(`${API}/api/workflow/${project.id}`)).json();
+    expect(Object.keys(beforeImport.tasks)).toHaveLength(0);
     await page.getByRole('button', { name: '确认导入任务', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('任务已导入');
     await page.getByRole('button', { name: '任务看板', exact: true }).click();
@@ -23,8 +30,26 @@ test('Sonail imports a manual plan, explains dependencies and switches language 
     expect(state.autonomous).toBe(false);
     expect(state.autoAccept).toBe(false);
     expect(Object.values(state.tasks).every((t: any) => t.phase === 'ready' && !t.acceptedAt)).toBeTruthy();
+    await page.getByRole('button', { name: '01 · 项目简介', exact: true }).click();
+    await page.getByText('原始执行过程（高级）', { exact: true }).click();
+    await page.getByRole('button', { name: '详细执行过程', exact: true }).click();
+    await expect(page.locator('#agent-panel').getByRole('button', { name: '执行记录', exact: true })).toBeVisible();
+    await expect(page.locator('#agent-panel').getByRole('button', { name: '任务说明', exact: true })).toBeVisible();
+    await page.getByTitle('关闭详情（Esc）', { exact: true }).click();
+    await expect(page.locator('#agent-panel')).not.toBeVisible();
+    await page.locator('.sb-drawer > header .sb-icon').click();
     await page.getByRole('button', { name: 'English', exact: true }).click();
     await expect(page.getByRole('navigation').getByRole('button', { name: 'Manager records', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Getting started', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Keep control without reading every line of code', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Continue current work', exact: true }).click();
+    await page.getByRole('button', { name: '01 · 项目简介', exact: true }).click();
+    await page.getByText('Raw execution activity (advanced)', { exact: true }).click();
+    await page.getByRole('button', { name: 'Detailed execution', exact: true }).click();
+    await expect(page.locator('#agent-panel').getByRole('button', { name: 'Events', exact: true })).toBeVisible();
+    await page.getByTitle('Close panel (Esc)', { exact: true }).click();
+    await expect(page.locator('#agent-panel')).not.toBeVisible();
+    await page.locator('.sb-drawer > header .sb-icon').click();
     await page.getByRole('button', { name: 'Integrations & appearance', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Service & startup', exact: true })).toBeVisible();
   } finally {

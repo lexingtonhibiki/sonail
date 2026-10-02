@@ -1,11 +1,13 @@
 # First project
 
+Open **Getting started** from the sidebar at any time. It shows the selected repository, integrated task count and links to the next step. **Load two-task example** fills the editor without creating cards; inspect and confirm it first. Use a separate demo project when trying the example.
+
 1. Install Node.js 22/24, Git and your preferred harness. Authenticate the harness outside Sonail.
 2. Run `Setup.cmd`, then `Open-Sonail.cmd`. The local preview uses API port 19100 and UI port 19101. Keep its extracted folder stable.
 3. Create a project pointing at an existing, committed Git repository. Worktrees branch from its baseline; a dirty target blocks integration.
 4. Configure the manager, executor and reviewer independently in **Roles & settings**. OpenCode discovers models from its installed provider catalog. Do not assume a model is free or supports every reasoning level.
 5. Write the original idea. Ask the manager to draft a proposal, then read/confirm it. For a no-model setup demonstration, paste `examples/demo.en.json` into **Idea & specification → Import JSON**. Dependencies are zero-based indices of earlier tasks.
-6. Start the first unlocked card. Follow concise conclusions in **Manager records**, or use **Original detail view** for execution events. Copying a handoff reports success/failure.
+6. Start the first unlocked card. Follow concise conclusions in **Manager records**, or open **Raw execution activity (advanced) → Detailed execution** in task details. The embedded panel's main controls follow the selected language; model output stays verbatim. Copying a handoff reports success/failure.
 7. Reviewers provide criterion-level evidence. Blocking findings require revision; advisory findings are optional. The manager checks the project fit. Human criteria remain for your actual experience.
 8. Accept only when satisfied, then **Integrate** from the card. It rechecks revision/fingerprint and unlocks downstream tasks. Reopening invalidates downstream assumptions; merely moving a card is not acceptance.
 

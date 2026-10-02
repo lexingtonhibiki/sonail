@@ -4,7 +4,7 @@ This is a public preview, not a promise of delivery dates. 这是公开预览版
 
 ## Next / 接下来
 
-- Improve first-run onboarding and finish Chinese localization of execution detail.
+- Finish localization of the upstream standalone detail pages; the Sonail workbench now includes a bilingual guide and embedded execution controls.
 - Validate Claude Code, DeepSeek Harness and custom endpoint flows with real credentials/account-supported models.
 - Add OS keyring storage and endpoint capability/connection checks.
 - Bring existing Sonail skill/MCP task packages and scoped project credentials into this fork.
