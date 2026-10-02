@@ -6,9 +6,16 @@ test('Sonail imports a manual plan, explains dependencies and switches language 
   const projectRes = await request.post(`${API}/api/projects`, { data: { name: 'Sonail onboarding', repoPath, defaultAgentType: 'opencode', defaultUseWorktree: true } });
   expect(projectRes.ok()).toBeTruthy();
   const project = await projectRes.json();
+  const emptyProjectRes = await request.post(`${API}/api/projects`, { data: { name: 'Sonail no repository' } });
+  expect(emptyProjectRes.ok()).toBeTruthy();
+  const emptyProject = await emptyProjectRes.json();
   try {
     await page.goto('/workbench');
     await expect(page.getByLabel('选择项目')).toBeVisible();
+    await page.getByLabel('选择项目').selectOption(emptyProject.id);
+    await page.getByRole('button', { name: '使用指引', exact: true }).click();
+    await expect(page.locator('.sb-guide').getByRole('button', { name: '新建项目', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '载入两任务示例', exact: true })).toBeDisabled();
     await page.getByLabel('选择项目').selectOption(project.id);
     await page.getByRole('button', { name: '使用指引', exact: true }).click();
     await expect(page.getByRole('heading', { name: '不用懂代码，也能掌握项目进展', exact: true })).toBeVisible();
@@ -54,5 +61,6 @@ test('Sonail imports a manual plan, explains dependencies and switches language 
     await expect(page.getByRole('heading', { name: 'Service & startup', exact: true })).toBeVisible();
   } finally {
     await request.delete(`${API}/api/projects/${project.id}`);
+    await request.delete(`${API}/api/projects/${emptyProject.id}`);
   }
 });
