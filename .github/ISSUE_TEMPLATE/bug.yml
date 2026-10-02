@@ -1,0 +1,20 @@
+name: Bug / 问题反馈
+description: Report a reproducible problem / 反馈可复现的问题
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps / 复现步骤
+      description: Remove keys and personal paths. 请勿包含密钥与个人路径。
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual / 预期与实际
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Sonail version, OS, Node / 版本与环境

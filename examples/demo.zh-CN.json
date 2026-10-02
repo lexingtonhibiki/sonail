@@ -1,0 +1,8 @@
+{
+  "productSpec": "制作一份简洁的项目简介与交付说明，让普通用户也能读懂。执行在独立Git工作树中进行，阅读体验留给用户确认。",
+  "technicalSpec": "只允许写notes/。02的上游notes/intro.txt只读。不得修改其他文件、添加依赖或联网。交付路径用相对路径，并提供验证证据。",
+  "tasks": [
+    {"title":"01 · 项目简介","description":"新建notes/intro.txt，恰好两行：Sonail Demo；任务隔离、独立审查、经理把关。只允许写notes/intro.txt，不安装依赖、不联网。","criteria":[{"id":"A1","text":"notes/intro.txt恰好包含指定的两行内容。","kind":"objective"},{"id":"A2","text":"用户能理解这份项目简介。","kind":"human"}],"dependsOn":[],"complexity":"small"},
+    {"title":"02 · 交付说明","description":"只读上游notes/intro.txt，不得修改。新建notes/delivery.md，写明上游文件名、准确引用两行原文并简要解释。只允许写notes/delivery.md，不安装依赖、不联网。","criteria":[{"id":"A1","text":"notes/delivery.md准确写明上游文件名并引用真实两行内容，上游未修改。","kind":"objective"},{"id":"A2","text":"用户无需技术知识便能读懂交付说明。","kind":"human"}],"dependsOn":[0],"complexity":"small"}
+  ]
+}

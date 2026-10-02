@@ -1,0 +1,8 @@
+{
+  "productSpec": "Create a short project introduction and a delivery guide that ordinary users can understand. Execution uses isolated Git worktrees; human reading experience remains a user decision.",
+  "technicalSpec": "Only write notes/. Upstream notes/intro.txt is read-only for task 02. Do not modify other files, add dependencies or use network access. Return relative deliverable paths and verification evidence.",
+  "tasks": [
+    {"title":"01 · Project introduction","description":"Create notes/intro.txt with two lines: Sonail Demo; Task isolation, independent review, manager oversight. Only write notes/intro.txt. Do not install dependencies or access the network.","criteria":[{"id":"A1","text":"notes/intro.txt contains exactly the requested two lines.","kind":"objective"},{"id":"A2","text":"The user finds the introduction understandable.","kind":"human"}],"dependsOn":[],"complexity":"small"},
+    {"title":"02 · Delivery guide","description":"Read upstream notes/intro.txt without changing it. Create notes/delivery.md naming the source file and quoting both lines exactly, followed by a concise explanation. Only write notes/delivery.md. No network or dependency installation.","criteria":[{"id":"A1","text":"notes/delivery.md names notes/intro.txt and quotes its actual two lines accurately; upstream is unchanged.","kind":"objective"},{"id":"A2","text":"The user can understand the delivery guide without technical expertise.","kind":"human"}],"dependsOn":[0],"complexity":"small"}
+  ]
+}

@@ -1,0 +1,16 @@
+node_modules/
+**/dist/
+*.tsbuildinfo
+data/
+.env
+.env.*
+!.env.example
+*.log
+*.db*
+*.sqlite*
+**/test-results/
+**/test-results-old/
+**/playwright-report/
+__pycache__/
+*.pyc
+release/

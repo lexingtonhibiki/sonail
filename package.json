@@ -1,0 +1,34 @@
+{
+  "name": "sonail",
+  "private": true,
+  "version": "0.1.0-preview.1",
+  "description": "A local AI project workbench with a project manager, independent review and human acceptance.",
+  "license": "MIT",
+  "author": "Sonail contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lexingtonhibiki/sonail.git"
+  },
+  "engines": { "node": ">=22 <25" },
+  "workspaces": [
+    "packages/client",
+    "packages/server",
+    "packages/e2e",
+    "shared"
+  ],
+  "scripts": {
+    "build": "npm run build:shared && npm run build:server && npm run build:client",
+    "test:server": "npm test -w @ai-agent-board/server",
+    "dev": "npm run build:shared && npx concurrently -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "npm run dev -w @ai-agent-board/client",
+    "dev:server": "npm run dev -w @ai-agent-board/server",
+    "build:shared": "npm run build -w @ai-agent-board/shared",
+    "build:client": "npm run build -w @ai-agent-board/client",
+    "build:server": "npm run build -w @ai-agent-board/server",
+    "test": "npm run test:e2e:required",
+    "test:e2e": "npm run test:e2e:required",
+    "test:e2e:required": "npm run test:required -w @ai-agent-board/e2e",
+    "gate:required": "node scripts/run-contract-tests.cjs && node scripts/run-required-gate.cjs",
+    "hooks:install": "node scripts/install-hooks.cjs"
+  }
+}
