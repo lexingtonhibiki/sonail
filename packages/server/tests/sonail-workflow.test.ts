@@ -415,8 +415,8 @@ test('appearance and project organization persist independently of roles and end
     const roles = structuredClone(f.p.roles);
     f.store.saveWorkbenchSettings({ theme: 'warm' }); f.store.saveMetadata('p', { category: '试验', pinned: true, archivedAt: 4 });
     assert.deepEqual(f.p.roles, roles);
-    assert.throws(() => f.store.saveWorkbenchSettings({ theme: 'dark' } as never), /Invalid appearance/);
-    assert.throws(() => f.store.saveWorkbenchSettings({ theme: 'sage', apiKey: 'secret' } as never), /Invalid appearance/);
+    assert.throws(() => f.store.saveWorkbenchSettings({ theme: 'dark' } as never), /Invalid global settings/);
+    assert.throws(() => f.store.saveWorkbenchSettings({ theme: 'sage', apiKey: 'secret' } as never), /Invalid global settings/);
     const restored = new WorkflowStore(path.join(f.tmp, 'workflow.json'));
     assert.equal(restored.workbenchSettings().theme, 'warm'); assert.deepEqual(restored.metadata('p'), f.store.metadata('p'));
     assert.equal(restored.listEndpoints()[0].apiKey, undefined); assert.equal(restored.endpoint('local').apiKey, 'test-private-key');
