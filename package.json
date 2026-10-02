@@ -1,7 +1,7 @@
 {
   "name": "sonail",
   "private": true,
-  "version": "0.1.0-preview.4",
+  "version": "0.1.0-preview.5",
   "description": "A local AI project workbench with a project manager, independent review and human acceptance.",
   "license": "MIT",
   "author": "Sonail contributors",

@@ -10,7 +10,8 @@
     "./types.js": "./dist/types.js",
     "./constants.js": "./dist/constants.js",
     "./workflow.js": "./dist/workflow.js",
-    "./workbench.js": "./dist/workbench.js"
+    "./workbench.js": "./dist/workbench.js",
+    "./quota.js": "./dist/quota.js"
   },
   "devDependencies": {
     "typescript": "~5.7.0"

@@ -29,4 +29,8 @@ Back up the entire `data/` directory after stopping. Never commit it. Endpoint k
 
 ## Scope of this preview
 
-Windows launch integration and the default SQLite workflow are the tested product route. The upstream PostgreSQL/container features are retained in source but not a verified Sonail deployment. Native adapters may have account/model limitations. No long-lived native manager session, arbitrary plugin loader, balance fetch or reset prediction UI is claimed.
+Windows launch integration and the default SQLite workflow are the tested product route. The upstream PostgreSQL/container features are retained in source but not a verified Sonail deployment. Native adapters may have account/model limitations. No long-lived native manager session, arbitrary plugin loader or balance fetch is claimed.
+
+## Codex quota
+
+Search for Codex in **Integrations & appearance** to show or hide the quota card. Community forecasts are optional and off by default; neither feature calls a model. See the [quota guide](QUOTA.md).

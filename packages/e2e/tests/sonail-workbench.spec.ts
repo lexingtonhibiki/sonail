@@ -70,3 +70,35 @@ test('Sonail imports a manual plan, explains dependencies and switches language 
     await request.delete(`${API}/api/projects/${emptyProject.id}`);
   }
 });
+
+
+test('Codex quota card keeps account limits, source attribution and global visibility in sync', async ({ page }) => {
+  let settings = { theme: 'sage', quotaVisibility: 'shown', resetForecast: true };
+  await page.route('**/api/workflow/settings', async route => {
+    if (route.request().method() === 'PUT') settings = { ...settings, ...route.request().postDataJSON() };
+    await route.fulfill({ json: settings });
+  });
+  await page.route('**/api/workflow/quota', route => route.fulfill({ json: {
+    account: { status: 'available', observedAt: Date.now(), buckets: [{ id: 'codex', name: 'codex', windows: [{ usedPercent: 28, remainingPercent: 72, windowDurationMins: 300, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, { usedPercent: 9, remainingPercent: 91, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }] }] },
+    forecast: { status: 'available', source: 'https://codex-reset.com/', observedAt: Date.now(), updatedAt: new Date().toISOString(), probability24h: 16, probability48h: 29, confidence: 'low', officialSignal: false },
+  } }));
+  await page.goto('/workbench');
+  const card = page.getByRole('complementary', { name: 'Codex 额度悬浮卡' });
+  await card.getByRole('button', { name: /Codex/ }).click();
+  await expect(card.getByText('72% 剩余')).toBeVisible();
+  await expect(card.getByText('91% 剩余')).toBeVisible();
+  await expect(card.getByRole('link', { name: '数据来源：codex-reset.com' })).toHaveAttribute('href', 'https://codex-reset.com/');
+  await card.getByRole('button', { name: '刷新额度', exact: true }).click();
+  await expect(card.getByText('读取已完成（缓存一分钟）')).toBeVisible();
+  await card.getByRole('button', { name: '隐藏额度卡', exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await page.getByRole('button', { name: '集成与外观', exact: true }).click();
+  await page.getByLabel('搜索集成设置').fill('Codex');
+  await expect(page.getByLabel('悬浮卡显示方式', { exact: true })).toHaveValue('hidden');
+  await page.getByLabel('悬浮卡显示方式', { exact: true }).selectOption('shown');
+  await expect(card).toBeVisible();
+  await page.getByLabel('开启社区刷新预测', { exact: true }).uncheck();
+  await expect(card.getByText('社区预测未开启，可在集成设置中打开。')).toBeVisible();
+  await page.getByRole('button', { name: 'English', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Codex quota card' }).getByText('72% remaining')).toBeVisible();
+});

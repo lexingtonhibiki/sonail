@@ -3,9 +3,11 @@ import type { Workflow } from '../services/workflow.js';
 import { asyncHandler } from './helpers.js';
 import { LocalService, isLocalServicePeer } from '../services/local-service.js';
 import { aiSetup } from './ai-integration.js';
+import { QuotaService } from '../services/quota.js';
 
-export function workflowRouter(engine: Workflow, service = new LocalService()): Router {
+export function workflowRouter(engine: Workflow, service = new LocalService(), quota = new QuotaService()): Router {
   const router = Router();
+  router.get('/quota', asyncHandler(async (_req, res) => { res.json(await quota.read(!!engine.store.workbenchSettings().resetForecast)); }));
   router.get('/ai-access/:projectId', asyncHandler(async (req, res) => {
     const id = String(req.params.projectId); await engine.project(id);
     res.json({ credentials: engine.aiAccess.list(id), setup: aiSetup(req.socket.localPort) });

@@ -44,8 +44,8 @@ export class WorkflowStore {
   listEndpoints(): Endpoint[] { return this.endpoints.map(({ apiKey, ...e }) => ({ ...e, hasKey: !!apiKey })); }
   workbenchSettings(): WorkbenchSettings { return { ...this.settings }; }
   saveWorkbenchSettings(input: WorkbenchSettings): WorkbenchSettings {
-    if (!input || Object.keys(input).some(k => k !== 'theme') || !['sage', 'warm', 'indigo'].includes(input.theme)) throw new Error('外观设置无效 / Invalid appearance settings');
-    this.settings = { theme: input.theme }; this.save(); return this.workbenchSettings();
+    if (!input || Object.keys(input).some(k => !['theme', 'quotaVisibility', 'resetForecast'].includes(k)) || !['sage', 'warm', 'indigo'].includes(input.theme) || (input.quotaVisibility !== undefined && !['auto', 'shown', 'hidden'].includes(input.quotaVisibility)) || (input.resetForecast !== undefined && typeof input.resetForecast !== 'boolean')) throw new Error('全局设置无效 / Invalid global settings');
+    this.settings = { ...this.settings, ...input }; this.save(); return this.workbenchSettings();
   }
   metadata(id: string): ProjectMeta { return this.projectMeta[id] ? { ...this.projectMeta[id] } : { category: '', pinned: false }; }
   saveMetadata(id: string, input: Partial<ProjectMeta>): ProjectMeta {

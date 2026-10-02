@@ -47,6 +47,7 @@ test('project credentials scope real HTTP/MCP drafts; user confirmation alone cr
   try {
     const issue = async (permission: string) => (await f.request('/api/workflow/ai-access/p', 'POST', { name: permission, permission })).json();
     const read = await issue('read'); const write = await issue('preview');
+    assert.equal((await f.request('/api/workflow/quota', 'GET', undefined, read.token)).status, 403);
     const saved = fs.readFileSync(path.join(f.temporary, 'sonail-ai-access.json'), 'utf8');
     assert.ok(!saved.includes(read.token) && !saved.includes(write.token));
     assert.equal(new AiAccessStore(path.join(f.temporary, 'sonail-ai-access.json')).authenticate(write.token)?.projectId, 'p');

@@ -16,6 +16,7 @@ flowchart LR
 ```
 
 - `shared/workflow.ts`: proposals, role profiles, criteria, review contracts and objective acceptance rules.
+- `shared/quota.ts` and `services/quota.ts`: separate account/source adapters, owner-only quota route, shared one-minute cache and optional source attribution; see [quota contract](QUOTA.md).
 - `shared/workbench.ts`: project overview, appearance and versioned source integration contracts.
 - `packages/server/src/services/workflow.ts`: lifecycle, dependency/revision checks, bounded advancement and Git integration.
 - `workflow-store.ts`: persisted project context/configuration; `harness.ts`: adapters; `local-service.ts`: native Windows startup actions.

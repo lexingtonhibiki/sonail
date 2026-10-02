@@ -43,6 +43,7 @@ You know what you want. You may not want to interpret every test log or technica
 - **Manager records:** conclusions, blockers, next steps and revisions; original execution detail retained.
 - **Bounded autonomy:** disclosed fully managed mode, concurrency/revision limits, human experience gates.
 - **Your models:** set each role's harness/model/reasoning; automatic selection uses your candidate list.
+- **Optional Codex quota card:** remaining account limits and an opt-in community reset outlook, with hide/collapse and source timestamps. [Guide](docs/QUOTA.md)
 - **Persistent local state:** SQLite, desktop launcher and Windows login startup; AI pauses on restart.
 
 **AI task import:** project-scoped read/preview credentials, a generation skill and MCP bridge. Inspect a readable plan before confirming cards. [Guide](docs/AI-INTEGRATION.md)
@@ -79,7 +80,7 @@ Open **http://127.0.0.1:19101/workbench**.
 | Codex | Native SDK adapter; our account rejected selected models, so verify your account's capabilities |
 | Claude Code / DeepSeek Harness | Adapters implemented; real-credential end-to-end acceptance pending |
 | OpenAI / Anthropic compatible endpoints, local models | Through OpenCode; requires endpoint/model capabilities |
-| Other harnesses, balances, reset predictions | Planned; see [Roadmap](docs/ROADMAP.md) |
+| Other harnesses, balances | Planned; see [Roadmap](docs/ROADMAP.md) |
 
 The manager currently creates separate native calls with project context, not one persistent native chat. Parts of the detailed pane remain English-only.
 

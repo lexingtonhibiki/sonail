@@ -1,5 +1,14 @@
 # Changelog / 更新记录
 
+## 0.1.0-preview.5 — 2026-10-03
+
+- Optional bilingual Codex remaining-quota card with collapse, hide, synchronized global settings and actual account reset times.
+- Native read-only app-server quota RPC; no threads, model calls or direct authentication-file access.
+- Replaceable codex-reset.com community forecast adapter, off by default, with visible credit, confidence, timestamps, a shared one-minute cache and Retry-After support.
+- Clear unavailable/old states and immediate setting feedback; project AI keys cannot read account quota.
+
+新增可隐藏的 Codex 剩余额度卡，收起/显示与统一设置同步。原生只读接口不调用模型；社区预测默认关闭，单独展示来源、置信度、更新时间与不确定性。余额仍留待未来模块。
+
 ## 0.1.0-preview.4 — 2026-10-03
 
 - Project-bound, revocable read/preview credentials with hashed storage and a copyable Codex/OpenCode/generic MCP configuration.
