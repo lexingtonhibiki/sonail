@@ -11,6 +11,10 @@ Open **Getting started** from the sidebar at any time. It shows the selected rep
 7. Reviewers provide criterion-level evidence. Blocking findings require revision; advisory findings are optional. The manager checks the project fit. Human criteria remain for your actual experience.
 8. Accept only when satisfied, then **Integrate** from the card. It rechecks revision/fingerprint and unlocks downstream tasks. Reopening invalidates downstream assumptions; merely moving a card is not acceptance.
 
+## Import from another AI session
+
+Issue a project credential in **Roles & settings**, then copy its MCP configuration and AI instructions. AI submissions and manual JSON imports both show a readable draft before confirmation creates cards. See [AI task import](AI-INTEGRATION.md).
+
 ## Autonomy
 
 Manual control is the default. **Fully managed** discloses and synchronizes automatic advancement, objective acceptance, integration and supplemental manager guidance. It preserves human experience gates and configured concurrency/revision limits. The manager cannot rewrite the canonical goal or criteria through supplemental guidance. Pausing does not undo commands already executed.

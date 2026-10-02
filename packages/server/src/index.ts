@@ -20,6 +20,7 @@ import { AgentManager } from './services/agent-manager.js';
 import { Workflow } from './services/workflow.js';
 import { WorkflowStore } from './services/workflow-store.js';
 import { workflowRouter } from './routes/workflow.js';
+import { aiIntegrationRouter } from './routes/ai-integration.js';
 import { authMiddleware } from './middleware/auth.js';
 import type { TaskRepository } from './repositories/types.js';
 import type { TemplateRepository } from './repositories/template-types.js';
@@ -118,6 +119,7 @@ const agentManager = new AgentManager();
 
   const workflow = new Workflow(new WorkflowStore(), taskRepo, projectRepo, agentManager);
   app.use('/api/workflow', workflowRouter(workflow));
+  app.use('/api/ai', aiIntegrationRouter(workflow));
   // Archived projects are read-only through upstream execution/edit routes too.
   app.use(['/api/tasks', '/api/groups', '/api/orchestrations', '/api/projects'], async (req, res, next) => {
     if (req.method === 'GET') { next(); return; }

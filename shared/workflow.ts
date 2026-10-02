@@ -11,7 +11,10 @@ export interface Criterion { id: string; text: string; kind: 'objective' | 'huma
 export interface ProposalTask {
   title: string; description: string; criteria: Criterion[]; dependsOn: number[]; complexity: 'small' | 'standard' | 'deep';
 }
-export interface Proposal { productSpec: string; technicalSpec: string; tasks: ProposalTask[]; }
+export interface Proposal { originalIdea?: string; productSpec: string; technicalSpec: string; tasks: ProposalTask[]; }
+export type AiPermission = 'read' | 'preview';
+export interface AiCredentialInfo { id: string; name: string; projectId: string; permission: AiPermission; createdAt: number; expiresAt: number; revokedAt?: number; }
+export interface ImportPreview { id: string; digest: string; revision: number; fingerprint: string; baselineCommit: string; source: string; }
 export interface Finding { severity: 'blocking' | 'advisory'; text: string; }
 export interface TaskAdjustment { reason: string; instructions: string; complexity?: 'small' | 'standard' | 'deep'; }
 export interface Assessment {
@@ -33,7 +36,7 @@ export interface WorkflowEvent {
 }
 export interface ProjectWorkflow {
   idea: string; productSpec: string; technicalSpec: string; revision: number;
-  roles: Record<Role, RoleProfile>; proposal?: Proposal;
+  roles: Record<Role, RoleProfile>; proposal?: Proposal; importPreview?: ImportPreview;
   autonomous: boolean; autoAccept: boolean; autoMerge: boolean; maxConcurrency: number; maxRevisions: number;
   fullManaged: boolean; managerMayEdit: boolean; managerRecords: ManagerRecord[];
   paused: boolean; tasks: Record<string, TaskPolicy>; events: WorkflowEvent[];
@@ -60,6 +63,7 @@ export function parseJson<T>(text: string): T {
   return JSON.parse(source) as T;
 }
 export function validateProposal(p: Proposal): void {
+  if (p?.originalIdea !== undefined && (typeof p.originalIdea !== 'string' || !p.originalIdea.trim())) throw new Error('原始需求应为非空文字 / Original request must be nonempty text');
   if (!p || typeof p.productSpec !== 'string' || !p.productSpec.trim() || typeof p.technicalSpec !== 'string' || !Array.isArray(p.tasks) || !p.tasks.length || p.tasks.length > 30) throw new Error('方案缺少产品说明或任务 / Invalid proposal');
   for (const [i, t] of p.tasks.entries()) {
     if (typeof t.title !== 'string' || !t.title.trim() || t.title.length > 200 || typeof t.description !== 'string' || t.description.length > 5000 || !['small', 'standard', 'deep'].includes(t.complexity)) throw new Error('任务内容无效 / Invalid task');

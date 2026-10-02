@@ -10,6 +10,7 @@ import type { AgentManager } from './agent-manager.js';
 import { broadcastTaskUpdate } from '../routes/helpers.js';
 import { HarnessProvider } from './harness.js';
 import { WorkflowStore } from './workflow-store.js';
+import { AiAccessStore } from './ai-access.js';
 import { mayAutoAccept, parseJson, selectProfile, validateAssessment, validateCriteria, validateProfile, validateProposal, type Assessment, type ProjectWorkflow, type Proposal, type Role, type RoleProfile, type TaskPolicy } from '@ai-agent-board/shared/workflow.js';
 
 export function git(cwd: string, args: string[]): string { return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true }).trim(); }
@@ -24,10 +25,12 @@ export function workspaceDigest(cwd: string, policy: TaskPolicy, revision: numbe
 const assessmentSchema = 'Return only JSON: {"verdict":"pass|revise|blocked","summary":"clear Chinese recommendation, why, and the next user action","criteria":[{"id":"exact criterion id","status":"pass|fail|unknown|human","evidence":"actual path, verification result, or why user experience is required"}],"findings":[{"severity":"blocking|advisory","text":"issue or optional improvement"}],"humanChecks":["only actual user experience checks"],"revision":"concrete executor correction instructions"}. Findings MUST use objects with explicit severity; optional polish is advisory and must not block pass. Human checks are NOT optional implementation improvements; independently verifiable correctness should be your responsibility. Cover every criterion exactly once. Never infer tests ran from the executor claim. Unknown or blocking is not pass. Criteria marked human MUST stay human. Do not lower requirements. Do not claim lack of a tool is a user experience requirement. If verdict is revise, manager may optionally add taskAdjustment:{"reason":"why the current execution approach is infeasible","instructions":"replacement or supplemental implementation method within the original scope and unchanged acceptance criteria","complexity":"small|standard|deep"}. Omit taskAdjustment if unnecessary. Never change the original goal, acceptance criteria, dependencies, permitted write scope, selected harness or budget.';
 
 export class Workflow {
+  readonly aiAccess: AiAccessStore;
   readonly active = new Map<string, { projectId: string; cancel: () => Promise<unknown> }>();
   private projectLocks = new Set<string>();
   private timer?: ReturnType<typeof setInterval>;
   constructor(readonly store: WorkflowStore, private repo: TaskRepository, private projects: ProjectRepository, private agents: AgentManager, private providerFactory = (p: RoleProfile, role: Role) => new HarnessProvider(p, role, p.endpointId ? store.endpoint(p.endpointId) : undefined)) {
+    this.aiAccess = new AiAccessStore(path.join(path.dirname(store.file), 'sonail-ai-access.json'));
     agents.setRedactor(text => store.redact(text));
   }
   private invalidate(t: TaskPolicy) {
@@ -52,13 +55,57 @@ export class Workflow {
     }
   }
   async project(id: string) { const p = await this.projects.getById(id); if (!p) throw new Error('项目不存在 / Project missing'); return p; }
+  async importContext(id: string) {
+    const project = await this.project(id);
+    if (!project.repoPath) throw new Error('先为项目选择 Git 仓库 / Select a Git repository first');
+    const repoPath = fs.realpathSync(project.repoPath);
+    const common = fs.realpathSync(path.resolve(repoPath, git(repoPath, ['rev-parse', '--git-common-dir'])));
+    const roots = git(repoPath, ['rev-list', '--max-parents=0', 'HEAD']).split('\n').sort().join('\n');
+    const normalize = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value;
+    const fingerprint = createHash('sha256').update(JSON.stringify([id, normalize(repoPath), normalize(common), roots])).digest('hex');
+    const workflow = this.store.get(id);
+    const tasks = (await this.repo.getAll(true, id)).map(task => {
+      const policy = workflow.tasks[task.id];
+      return { id: task.id, title: task.title, description: task.description, phase: policy?.phase || task.columnId, criteria: policy?.criteria || [], dependsOn: policy?.dependsOn || [], managerGuidance: policy?.managerInstructions, managerRecommendation: policy?.manager?.summary, attention: policy?.attention };
+    });
+    return { projectId: id, name: project.name, repoPath, fingerprint, revision: workflow.revision, baselineCommit: git(repoPath, ['rev-parse', 'HEAD']), idea: workflow.idea, productSpec: workflow.productSpec, technicalSpec: workflow.technicalSpec, pendingPlan: workflow.proposal ? { source: workflow.importPreview?.source, proposal: workflow.proposal } : undefined, tasks };
+  }
+  async previewImport(id: string, proposal: Proposal, expectedRevision: number, fingerprint: string, source: string) {
+    return this.exclusive(id, async () => {
+      this.assertNotArchived(id);
+      validateProposal(proposal);
+      const context = await this.importContext(id); const workflow = this.store.get(id);
+      if (context.fingerprint !== fingerprint || context.revision !== expectedRevision) throw new Error('项目或方案已变化，请重新读取项目 / Project or plan changed; read context again');
+      if (Object.keys(workflow.tasks).length) throw new Error('项目已有任务；请逐卡修订 / Existing tasks require per-card revision');
+      if ([...this.active.values()].some(active => active.projectId === id)) throw new Error('项目正在运行，请稍后送审 / Project is running');
+      const hash = createHash('sha256').update(JSON.stringify(proposal)).digest('hex');
+      if (workflow.proposal) {
+        if (workflow.importPreview?.digest === hash) return { ...workflow.importPreview, idempotent: true };
+        throw new Error('已有待确认方案，请在页面先处理或丢弃 / Resolve the existing draft in the console first');
+      }
+      const preview = { id: randomUUID(), digest: hash, revision: context.revision, fingerprint, baselineCommit: context.baselineCommit, source };
+      workflow.proposal = structuredClone(proposal); workflow.importPreview = preview;
+      this.store.record(id, { kind: 'plan', summary: `${source}：提交了 ${proposal.tasks.length} 项任务的待确认方案；尚未创建卡片 / Submitted a draft, no cards created` });
+      this.event(id, 'system', '收到待确认方案，请在「想法与规格」查看 / Draft received; open Idea & specification');
+      return { ...preview, idempotent: false };
+    });
+  }
+  async discardProposal(id: string): Promise<void> {
+    await this.exclusive(id, async () => {
+      this.assertNotArchived(id);
+      if ([...this.active.values()].some(active => active.projectId === id)) throw new Error('项目正在运行 / Project running');
+      const workflow = this.store.get(id);
+      delete workflow.proposal; delete workflow.importPreview;
+      this.event(id, 'system', '已丢弃待确认方案，任务未变 / Draft discarded; tasks unchanged');
+    });
+  }
   async projectSummaries(): Promise<ProjectSummary[]> {
     const projects = await this.projects.getAllWithCounts();
     return Promise.all(projects.map(async project => {
       const tasks = await this.repo.getAll(true, project.id); const p = this.store.get(project.id);
       const integrated = tasks.filter(task => p.tasks[task.id]?.acceptedAt && p.tasks[task.id]?.mergedAt && p.tasks[task.id]?.integratedCommit).length;
       const running = tasks.filter(task => ['executing', 'reviewing', 'manager-check'].includes(p.tasks[task.id]?.phase || '') || task.agentStatus === 'executing' || task.agentStatus === 'planning').length;
-      const attention = tasks.filter(task => ['awaiting-user', 'blocked', 'failed', 'needs-changes', 'interrupted', 'integration-blocked', 'accepted'].includes(p.tasks[task.id]?.phase || '')).length;
+      const attention = Number(!!p.proposal) + tasks.filter(task => ['awaiting-user', 'blocked', 'failed', 'needs-changes', 'interrupted', 'integration-blocked', 'accepted'].includes(p.tasks[task.id]?.phase || '')).length;
       const lastActivity = Math.max(project.updatedAt || project.createdAt || 0, ...tasks.map(task => task.completedAt || task.startedAt || task.createdAt), ...p.events.map(event => event.at));
       return { id: project.id, name: project.name, repoPath: project.repoPath, isDefault: project.isDefault, total: tasks.length, integrated, attention, running, complete: tasks.length > 0 && integrated === tasks.length && running === 0, lastActivity, meta: this.store.metadata(project.id) };
     }));
@@ -103,7 +150,7 @@ export class Workflow {
     if (input.maxRevisions !== undefined && (!Number.isInteger(input.maxRevisions) || input.maxRevisions < 0 || input.maxRevisions > 5)) throw new Error('返工上限为 0–5 / Revision cap 0–5');
     const changed = ['idea', 'productSpec', 'technicalSpec'].some(k => input[k as 'idea'] !== undefined && input[k as 'idea'] !== p[k as 'idea']);
     if (changed) {
-      p.revision++; delete p.proposal; p.paused = true;
+      p.revision++; delete p.proposal; delete p.importPreview; p.paused = true;
       for (const t of Object.values(p.tasks)) { this.invalidate(t); t.generation = (t.generation || 0) + 1; t.phase = 'spec-changed'; }
     }
     const oldManaged = p.fullManaged;
@@ -161,6 +208,7 @@ export class Workflow {
       this.assertNotArchived(id);
       if (this.busy(id) && [...this.active.values()].some(a => a.projectId === id)) throw new Error('请先等待当前任务 / Wait for current work');
       const project = await this.project(id); const p = this.store.get(id);
+      if (p.importPreview) throw new Error('先确认或丢弃已有来稿 / Resolve the pending imported draft first');
       if (!p.idea.trim()) throw new Error('先填写原始想法 / Enter original idea first');
       const prompt = `Original need:\n${p.idea}\nCurrent product specification:\n${p.productSpec}\nClarify ambiguities in the product specification. Create a minimal coherent task plan. Preserve scope and upstream read-only artifacts. Include paths allowed to write and dependency restrictions in task descriptions. Use paths relative to the assigned task worktree, never hardcode the main project directory as a write target. Do not add unrequested technical restrictions or contradictory criteria. Return only JSON: {"productSpec":"user-readable usage and expected result","technicalSpec":"implementation boundaries and verification","tasks":[{"title":"01 name","description":"execution instructions and allowed write paths","criteria":[{"id":"A1","text":"criterion","kind":"objective|human"}],"dependsOn":[],"complexity":"small|standard|deep"}]}. productSpec and technicalSpec MUST be plain strings, NOT objects or arrays. dependsOn is zero-based indices of earlier tasks. Never publish or execute the plan.`;
       const cwd = project.repoPath || process.cwd();
@@ -182,6 +230,10 @@ export class Workflow {
       if ([...this.active.values()].some(a => a.projectId === id)) throw new Error('项目正在运行 / Project running');
       const project = await this.project(id); const p = this.store.get(id); const plan = proposal || p.proposal;
       validateProposal(plan!);
+      if (p.importPreview && !proposal) {
+        const context = await this.importContext(id);
+        if (context.fingerprint !== p.importPreview.fingerprint || context.revision !== p.importPreview.revision || context.baselineCommit !== p.importPreview.baselineCommit) throw new Error('项目或基线已变化，请丢弃并重新送审方案 / Project baseline changed; resubmit the draft');
+      }
       if (Object.keys(p.tasks).length) throw new Error('项目已有任务；请逐卡修订，避免重复导入 / Existing tasks: revise cards instead of duplicating');
       const created: string[] = [];
       try {
@@ -190,9 +242,11 @@ export class Workflow {
           await this.repo.create(task); created.push(task.id);
         }
       } catch (e) { for (const taskId of created) await this.repo.delete(taskId); throw e; }
+      if (!p.idea.trim() && plan!.originalIdea) p.idea = plan!.originalIdea;
       p.productSpec = plan!.productSpec; p.technicalSpec = plan!.technicalSpec; p.revision++;
       plan!.tasks.forEach((item, i) => { p.tasks[created[i]] = { criteria: item.criteria, dependsOn: item.dependsOn.map(n => created[n]), complexity: item.complexity, rounds: 0, phase: 'ready' }; });
-      delete p.proposal; this.event(id, 'system', `已发布 ${created.length} 张任务卡 / Published ${created.length} tasks`);
+      delete p.proposal; delete p.importPreview; this.event(id, 'system', `已发布 ${created.length} 张任务卡 / Published ${created.length} tasks`);
+      this.store.record(id, { kind: 'plan', summary: `方案已确认，${created.length} 张任务卡已发布；执行按项目授权启动 / Plan confirmed; ${created.length} tasks published, execution follows project permissions` });
       for (const taskId of created) broadcastTaskUpdate((await this.repo.getById(taskId))!);
       return created;
     });

@@ -1,7 +1,7 @@
 {
   "name": "sonail",
   "private": true,
-  "version": "0.1.0-preview.3",
+  "version": "0.1.0-preview.4",
   "description": "A local AI project workbench with a project manager, independent review and human acceptance.",
   "license": "MIT",
   "author": "Sonail contributors",
@@ -9,7 +9,9 @@
     "type": "git",
     "url": "https://github.com/lexingtonhibiki/sonail.git"
   },
-  "engines": { "node": ">=22 <25" },
+  "engines": {
+    "node": ">=22 <25"
+  },
   "workspaces": [
     "packages/client",
     "packages/server",
@@ -30,5 +32,8 @@
     "test:e2e:required": "npm run test:required -w @ai-agent-board/e2e",
     "gate:required": "node scripts/run-contract-tests.cjs && node scripts/run-required-gate.cjs",
     "hooks:install": "node scripts/install-hooks.cjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
   }
 }

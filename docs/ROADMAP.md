@@ -7,7 +7,7 @@ This is a public preview, not a promise of delivery dates. 这是公开预览版
 - Finish localization of the upstream standalone detail pages; the Sonail workbench now includes a bilingual guide and embedded execution controls.
 - Validate Claude Code, DeepSeek Harness and custom endpoint flows with real credentials/account-supported models.
 - Add OS keyring storage and endpoint capability/connection checks.
-- Bring existing Sonail skill/MCP task packages and scoped project credentials into this fork.
+- Extend scoped AI access to proposed per-card revisions and privileged manager actions; current credentials support project inspection and plan preview only.
 - Support a persistent native project-manager session with an honest availability state.
 
 ## Later / 后续

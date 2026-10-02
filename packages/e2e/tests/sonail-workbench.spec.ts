@@ -28,8 +28,14 @@ test('Sonail imports a manual plan, explains dependencies and switches language 
     expect(JSON.parse(await page.getByLabel('任务方案 JSON').inputValue()).tasks).toHaveLength(2);
     const beforeImport = await (await request.get(`${API}/api/workflow/${project.id}`)).json();
     expect(Object.keys(beforeImport.tasks)).toHaveLength(0);
-    await page.getByRole('button', { name: '确认导入任务', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('任务已导入');
+    await page.getByRole('button', { name: '预览导入方案', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '这是不是你想要的结果？', exact: true })).toBeVisible();
+    const staged = await (await request.get(`${API}/api/workflow/${project.id}`)).json();
+    expect(staged.proposal.tasks).toHaveLength(2);
+    expect(Object.keys(staged.tasks)).toHaveLength(0);
+    await expect(page.getByText('等待：01 · 项目简介', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '符合我的想法，发布任务', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('方案已确认，任务卡已发布');
     await page.getByRole('button', { name: '任务看板', exact: true }).click();
     await expect(page.getByRole('button', { name: '01 · 项目简介', exact: true })).toBeVisible();
     await expect(page.getByText('等待上游合入', { exact: true })).toBeVisible();

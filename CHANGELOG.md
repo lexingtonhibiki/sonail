@@ -1,5 +1,14 @@
 # Changelog / 更新记录
 
+## 0.1.0-preview.4 — 2026-10-03
+
+- Project-bound, revocable read/preview credentials with hashed storage and a copyable Codex/OpenCode/generic MCP configuration.
+- Official SDK stdio MCP and a dedicated `sonail-plan` skill send AI drafts into the console without model calls or automatic publication.
+- Readable manual/AI previews show the original request, intended result, task dependencies and human experience checks before confirmation.
+- Repository identity, plan revision and Git baseline checks prevent stale imports; pending drafts appear in project attention and open directly.
+
+项目范围凭据支持只读、送审和撤销；密钥仅保存摘要。新增原生工具 MCP 配置与任务规划 skill，AI 来稿和手动 JSON 都先展示结果、依赖与体验条件，确认后创建卡片。待确认方案在项目总览中提醒，不会自动执行或代替用户验收。
+
 ## 0.1.0-preview.3 — 2026-10-03
 
 - Always reachable Chinese/English getting-started guide with the selected repository, real integration progress and direct next-step links.

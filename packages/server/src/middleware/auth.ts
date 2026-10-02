@@ -5,6 +5,7 @@ export type ServiceScope = 'projects:read' | 'agents:read' | 'orchestrations:cre
 const ALL_SERVICE_SCOPES: ServiceScope[] = ['projects:read', 'agents:read', 'orchestrations:create', 'orchestrations:read', 'orchestrations:message', 'tasks:relationships'];
 
 interface Credential { token?: string; sha256?: string; scopes: ServiceScope[] }
+export function bearerToken(header?: string): string | undefined { return /^Bearer\s+(\S+)\s*$/i.exec(header || '')?.[1]; }
 
 function credentials(): Credential[] {
   const raw = process.env.SERVICE_TOKENS;
@@ -46,11 +47,15 @@ export function requiredScope(req: Request): ServiceScope | undefined {
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const token = bearerToken(req.headers.authorization);
+  // The AI integration authenticates its project credentials in its own router.
+  if (req.path.startsWith('/ai/')) { next(); return; }
+  if (token?.startsWith('sonail_') && token !== process.env.API_KEY) {
+    res.status(403).json({ error: '项目 AI 凭据仅允许读取或送审，不允许控制台管理操作 / Project AI credentials cannot control the console' }); return;
+  }
   const hasLegacyKey = Boolean(process.env.API_KEY);
   const serviceCredentials = credentials();
   const scope = requiredScope(req);
-  const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
 
   // API_KEY retains the legacy "protect every API route" behavior.
   if (hasLegacyKey) {

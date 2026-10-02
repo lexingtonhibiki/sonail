@@ -9,7 +9,7 @@ export class WorkflowStore {
   private endpoints: Endpoint[] = [];
   private settings: WorkbenchSettings = { theme: 'sage' };
   private projectMeta: Record<string, ProjectMeta> = {};
-  constructor(private file = process.env.SONAIL_WORKFLOW_FILE || path.resolve('data/sonail-workflow.json')) {
+  constructor(readonly file = process.env.SONAIL_WORKFLOW_FILE || path.resolve('data/sonail-workflow.json')) {
     if (fs.existsSync(file)) {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
       this.projects = saved.projects || {}; this.endpoints = saved.endpoints || [];

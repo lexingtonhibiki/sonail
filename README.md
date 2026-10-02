@@ -45,6 +45,8 @@ You know what you want. You may not want to interpret every test log or technica
 - **Your models:** set each role's harness/model/reasoning; automatic selection uses your candidate list.
 - **Persistent local state:** SQLite, desktop launcher and Windows login startup; AI pauses on restart.
 
+**AI task import:** project-scoped read/preview credentials, a generation skill and MCP bridge. Inspect a readable plan before confirming cards. [Guide](docs/AI-INTEGRATION.md)
+
 ## Quick start
 
 Requires **Windows 10/11, Node.js 22 or 24, Git** and an installed/authenticated harness. Model charges and permissions belong to its provider.
