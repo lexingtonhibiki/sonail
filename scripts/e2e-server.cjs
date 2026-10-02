@@ -6,6 +6,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const isWindows = process.platform === 'win32';
 const dbPath = path.join(repoRoot, 'packages', 'e2e', 'test-results', 'agentboard-e2e.db');
 const agentboardHome = path.join(repoRoot, 'packages', 'e2e', 'test-results', 'agentboard-home');
+const workflowFile = path.join(repoRoot, 'packages', 'e2e', 'test-results', 'sonail-workflow.json');
 function portFromEnv(name, fallback) {
   const value = process.env[name] || fallback;
   if (!/^\d+$/.test(value)) {
@@ -24,6 +25,7 @@ const allowedRepoRoots = [
 
 mkdirSync(path.dirname(dbPath), { recursive: true });
 rmSync(dbPath, { force: true });
+rmSync(workflowFile, { force: true });
 rmSync(agentboardHome, { recursive: true, force: true });
 mkdirSync(agentboardHome, { recursive: true });
 
@@ -34,6 +36,9 @@ const child = spawn(isWindows ? 'npx tsx src/index.ts' : 'npx', isWindows ? [] :
     PORT: serverPort,
     DATABASE_URL: '',
     DB_PATH: dbPath,
+    // Keep Sonail workflow state with the isolated E2E database, away from
+    // contract fixtures and any developer's regular server data.
+    SONAIL_WORKFLOW_FILE: workflowFile,
     API_KEY: '',
     ALLOWED_ORIGINS: `http://localhost:${clientPort}`,
     ALLOWED_REPO_ROOTS: allowedRepoRoots,
