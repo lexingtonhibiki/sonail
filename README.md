@@ -44,6 +44,7 @@ You know what you want. You may not want to interpret every test log or technica
 - **Bounded autonomy:** disclosed fully managed mode, concurrency/revision limits, human experience gates.
 - **Your models:** set each role's harness/model/reasoning; automatic selection uses your candidate list.
 - **Optional Codex quota card:** remaining account limits and an opt-in community reset outlook, with hide/collapse and source timestamps. [Guide](docs/QUOTA.md)
+- **Shared tools directory:** configurable per machine, with a Windows D-drive/user-data fallback and consistent AI/manual instructions. [Guide](docs/TOOLS.md)
 - **Persistent local state:** SQLite, desktop launcher and Windows login startup; AI pauses on restart.
 
 **AI task import:** project-scoped read/preview credentials, a generation skill and MCP bridge. Inspect a readable plan before confirming cards. [Guide](docs/AI-INTEGRATION.md)

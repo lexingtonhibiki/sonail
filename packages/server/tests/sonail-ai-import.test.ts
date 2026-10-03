@@ -52,6 +52,7 @@ test('project credentials scope real HTTP/MCP drafts; user confirmation alone cr
     assert.ok(!saved.includes(read.token) && !saved.includes(write.token));
     assert.equal(new AiAccessStore(path.join(f.temporary, 'sonail-ai-access.json')).authenticate(write.token)?.projectId, 'p');
     const context = await (await f.request('/api/ai/context', 'GET', undefined, read.token)).json();
+    assert.equal(context.toolsDirectory, f.engine.store.workbenchSettings().toolsDirectory);
     assert.equal(context.projectId, 'p'); assert.equal(context.repoPath, fs.realpathSync(f.project.repoPath));
     assert.ok(!('roles' in context) && !('events' in context));
     const input = { proposal, fingerprint: context.fingerprint, expectedRevision: context.revision };

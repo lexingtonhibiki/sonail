@@ -12,7 +12,7 @@ This is a public preview, not a promise of delivery dates. 这是公开预览版
 
 ## Later / 后续
 
-- Configurable tools directory, more harness adapters and portable launch support.
+- More harness adapters and portable launch support.
 - Balance adapters only when a provider has a useful supported API.
 - Source integration modules; evaluate dynamic plugins after permission and lifecycle boundaries are proven.
 

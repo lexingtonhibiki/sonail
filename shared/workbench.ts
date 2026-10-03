@@ -8,7 +8,7 @@ export const integrationSlots = [
   { id: 'balance', name: '余额与额度', status: 'planned' },
   { id: 'reset-signals', name: '刷新信号', status: 'available' },
 ] as const;
-export interface WorkbenchSettings { theme: 'sage' | 'warm' | 'indigo'; quotaVisibility?: 'auto' | 'shown' | 'hidden'; resetForecast?: boolean; }
+export interface WorkbenchSettings { theme: 'sage' | 'warm' | 'indigo'; quotaVisibility?: 'auto' | 'shown' | 'hidden'; resetForecast?: boolean; toolsDirectory?: string; }
 export interface ShortcutStatus { enabled: boolean; conflict: boolean; desktopExists: boolean; startupPath: string; desktopPath: string; }
 export interface ServiceStatus {
   supported: boolean; apiRunning: boolean; uiRunning: boolean; url: string;

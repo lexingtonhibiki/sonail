@@ -1,5 +1,14 @@
 # Changelog / 更新记录
 
+## 0.1.0-preview.6 — 2026-10-03
+
+- Configurable tools directory in searchable bilingual global settings, with save and restore-default feedback.
+- Windows defaults to D:/DevTools when D exists, otherwise local application data; other systems use user data.
+- Effective directory follows planning, executor/reviewer/manager instructions, manual handoffs and project-scoped AI context.
+- Settings persist without creating directories, installing software, changing PATH or granting network/installation rights.
+
+统一工具目录支持修改和恢复默认，兼顾只有 C 盘的电脑。规划、任务执行、人工交接及 AI 项目上下文使用同一目录；设置本身不安装工具或授予新权限。
+
 ## 0.1.0-preview.5 — 2026-10-03
 
 - Optional bilingual Codex remaining-quota card with collapse, hide, synchronized global settings and actual account reset times.

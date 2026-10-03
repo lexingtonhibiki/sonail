@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { WorkflowStore } from '../src/services/workflow-store.js';
+import { WorkflowStore, defaultToolsDirectory } from '../src/services/workflow-store.js';
 import { CodexQuotaAdapter, CodexResetAdapter, QuotaService, accountQuota, resetForecast, RESET_SOURCE } from '../src/services/quota.js';
 
 test('quota RPC reads windows without starting threads or returning account secrets', async () => {
@@ -19,7 +19,7 @@ test('quota RPC reads windows without starting threads or returning account secr
     const file = path.join(temporary, 'workflow.json'); const store = new WorkflowStore(file);
     store.saveWorkbenchSettings({ theme: 'sage', quotaVisibility: 'hidden', resetForecast: true });
     store.saveWorkbenchSettings({ theme: 'indigo' });
-    assert.deepEqual(new WorkflowStore(file).workbenchSettings(), { theme: 'indigo', quotaVisibility: 'hidden', resetForecast: true });
+    assert.deepEqual(new WorkflowStore(file).workbenchSettings(), { theme: 'indigo', quotaVisibility: 'hidden', resetForecast: true, toolsDirectory: defaultToolsDirectory() });
   } finally {
     assert.equal(path.dirname(path.resolve(temporary)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(temporary).startsWith('sonail-quota-'));

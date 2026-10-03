@@ -68,7 +68,7 @@ export class Workflow {
       const policy = workflow.tasks[task.id];
       return { id: task.id, title: task.title, description: task.description, phase: policy?.phase || task.columnId, criteria: policy?.criteria || [], dependsOn: policy?.dependsOn || [], managerGuidance: policy?.managerInstructions, managerRecommendation: policy?.manager?.summary, attention: policy?.attention };
     });
-    return { projectId: id, name: project.name, repoPath, fingerprint, revision: workflow.revision, baselineCommit: git(repoPath, ['rev-parse', 'HEAD']), idea: workflow.idea, productSpec: workflow.productSpec, technicalSpec: workflow.technicalSpec, pendingPlan: workflow.proposal ? { source: workflow.importPreview?.source, proposal: workflow.proposal } : undefined, tasks };
+    return { projectId: id, name: project.name, repoPath, toolsDirectory: this.store.workbenchSettings().toolsDirectory, fingerprint, revision: workflow.revision, baselineCommit: git(repoPath, ['rev-parse', 'HEAD']), idea: workflow.idea, productSpec: workflow.productSpec, technicalSpec: workflow.technicalSpec, pendingPlan: workflow.proposal ? { source: workflow.importPreview?.source, proposal: workflow.proposal } : undefined, tasks };
   }
   async previewImport(id: string, proposal: Proposal, expectedRevision: number, fingerprint: string, source: string) {
     return this.exclusive(id, async () => {
@@ -172,7 +172,7 @@ export class Workflow {
     let text = '';
     try {
       await provider.start(); if (cancelled) throw new Error('运行已取消 / Run cancelled');
-      session = await provider.createSession({ contextId: runId, workingDirectory: cwd, systemPrompt: `You are the ${role} of one project. Respond in clear Chinese unless the original need requests otherwise.`, onEvent: e => { if (cancelled) return; this.event(id, role, e.content, taskId, e.type); if (e.type === 'output') text += e.content; } });
+      session = await provider.createSession({ contextId: runId, workingDirectory: cwd, systemPrompt: `You are the ${role} of one project. Respond in clear Chinese unless the original need requests otherwise. If tool installation is authorized, use a tool-specific subdirectory under ${JSON.stringify(this.store.workbenchSettings().toolsDirectory)}. This setting grants no installation or network permission.`, onEvent: e => { if (cancelled) return; this.event(id, role, e.content, taskId, e.type); if (e.type === 'output') text += e.content; } });
       if (cancelled) throw new Error('运行已取消 / Run cancelled');
       const result = await session.execute(prompt);
       if (cancelled) throw new Error('运行已取消 / Run cancelled');
@@ -286,7 +286,7 @@ export class Workflow {
         }
       }
       const profile = selectProfile(policy.override || p.roles.executor, policy.complexity); validateProfile(profile);
-      const snapshot: Task = { ...task, runProfile: profile, runEndpoint: profile.endpointId ? this.store.endpoint(profile.endpointId) : undefined, description: `${task.description}\n\nProduct specification:\n${p.productSpec}\nTechnical boundaries:\n${p.technicalSpec}\nAcceptance:\n${JSON.stringify(policy.criteria)}\nDependencies are read-only. Do not modify upstream deliverables. Manager guidance may adjust implementation method ONLY, never override original goal, write scope, acceptance criteria or technical boundaries.\n${policy.managerInstructions ? `Manager execution guidance:\n${policy.managerInstructions}\n` : ''}${correction ? `Revision instructions:\n${correction}` : ''}`, agentType: profile.harness === 'dsh' ? 'opencode' : profile.harness, useWorktree: true };
+      const snapshot: Task = { ...task, runProfile: profile, runEndpoint: profile.endpointId ? this.store.endpoint(profile.endpointId) : undefined, description: `${task.description}\n\nProduct specification:\n${p.productSpec}\nTechnical boundaries:\n${p.technicalSpec}\nAcceptance:\n${JSON.stringify(policy.criteria)}\nIf tool installation is authorized, use a tool-specific subdirectory under ${JSON.stringify(this.store.workbenchSettings().toolsDirectory)}. This setting grants no installation or network permission.\nDependencies are read-only. Do not modify upstream deliverables. Manager guidance may adjust implementation method ONLY, never override original goal, write scope, acceptance criteria or technical boundaries.\n${policy.managerInstructions ? `Manager execution guidance:\n${policy.managerInstructions}\n` : ''}${correction ? `Revision instructions:\n${correction}` : ''}`, agentType: profile.harness === 'dsh' ? 'opencode' : profile.harness, useWorktree: true };
       const generation = policy.generation = (policy.generation || 0) + 1;
       const current = () => policy.generation === generation;
       this.invalidate(policy); policy.inputCommits = Object.fromEntries(policy.dependsOn.map(d => [d, p.tasks[d].integratedCommit!])); policy.phase = 'executing';

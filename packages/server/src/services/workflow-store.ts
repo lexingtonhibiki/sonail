@@ -1,8 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { defaults, type Endpoint, type ProjectWorkflow, type WorkflowEvent, type ManagerRecord } from '@ai-agent-board/shared/workflow.js';
 import type { WorkbenchSettings, ProjectMeta } from '../../../../shared/workbench.js';
+
+export function defaultToolsDirectory(): string {
+  if (process.platform === 'win32') return fs.existsSync('D:/') ? path.resolve('D:/DevTools') : path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Sonail', 'tools');
+  return path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'sonail', 'tools');
+}
 
 export class WorkflowStore {
   private projects: Record<string, ProjectWorkflow> = {};
@@ -42,10 +48,13 @@ export class WorkflowStore {
     p.events = p.events.slice(-250); this.save();
   }
   listEndpoints(): Endpoint[] { return this.endpoints.map(({ apiKey, ...e }) => ({ ...e, hasKey: !!apiKey })); }
-  workbenchSettings(): WorkbenchSettings { return { ...this.settings }; }
+  workbenchSettings(): WorkbenchSettings { return { toolsDirectory: defaultToolsDirectory(), ...this.settings }; }
   saveWorkbenchSettings(input: WorkbenchSettings): WorkbenchSettings {
-    if (!input || Object.keys(input).some(k => !['theme', 'quotaVisibility', 'resetForecast'].includes(k)) || !['sage', 'warm', 'indigo'].includes(input.theme) || (input.quotaVisibility !== undefined && !['auto', 'shown', 'hidden'].includes(input.quotaVisibility)) || (input.resetForecast !== undefined && typeof input.resetForecast !== 'boolean')) throw new Error('全局设置无效 / Invalid global settings');
-    this.settings = { ...this.settings, ...input }; this.save(); return this.workbenchSettings();
+    if (!input || Object.keys(input).some(k => !['theme', 'quotaVisibility', 'resetForecast', 'toolsDirectory'].includes(k)) || !['sage', 'warm', 'indigo'].includes(input.theme) || (input.quotaVisibility !== undefined && !['auto', 'shown', 'hidden'].includes(input.quotaVisibility)) || (input.resetForecast !== undefined && typeof input.resetForecast !== 'boolean')) throw new Error('全局设置无效 / Invalid global settings');
+    if (input.toolsDirectory !== undefined && (typeof input.toolsDirectory !== 'string' || (input.toolsDirectory.trim() && !path.isAbsolute(input.toolsDirectory.trim())) || input.toolsDirectory.includes('\0'))) throw new Error('请填写绝对目录，留空恢复默认 / Enter an absolute directory or leave blank for default');
+    this.settings = { ...this.settings, ...input };
+    if (input.toolsDirectory !== undefined) { if (input.toolsDirectory.trim()) this.settings.toolsDirectory = path.resolve(input.toolsDirectory.trim()); else delete this.settings.toolsDirectory; }
+    this.save(); return this.workbenchSettings();
   }
   metadata(id: string): ProjectMeta { return this.projectMeta[id] ? { ...this.projectMeta[id] } : { category: '', pinned: false }; }
   saveMetadata(id: string, input: Partial<ProjectMeta>): ProjectMeta {

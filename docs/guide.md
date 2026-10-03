@@ -34,3 +34,7 @@ Windows launch integration and the default SQLite workflow are the tested produc
 ## Codex quota
 
 Search for Codex in **Integrations & appearance** to show or hide the quota card. Community forecasts are optional and off by default; neither feature calls a model. See the [quota guide](QUOTA.md).
+
+## Tools directory
+
+Search **tools** in Integrations & appearance to edit the machine-wide installation root or restore the default. AI/native and manual handoffs share it. See [directory policy](TOOLS.md).

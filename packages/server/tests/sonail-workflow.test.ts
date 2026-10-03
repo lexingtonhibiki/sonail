@@ -413,12 +413,17 @@ test('appearance and project organization persist independently of roles and end
   const f = fixture(); try {
     f.store.saveEndpoint({ id: 'local', name: 'Local', protocol: 'openai', baseUrl: 'http://127.0.0.1:1234/v1', apiKey: 'test-private-key' });
     const roles = structuredClone(f.p.roles);
-    f.store.saveWorkbenchSettings({ theme: 'warm' }); f.store.saveMetadata('p', { category: '试验', pinned: true, archivedAt: 4 });
+    const tools = path.join(f.tmp, 'shared-tools');
+    f.store.saveWorkbenchSettings({ theme: 'warm', toolsDirectory: tools }); f.store.saveMetadata('p', { category: '试验', pinned: true, archivedAt: 4 });
     assert.deepEqual(f.p.roles, roles);
     assert.throws(() => f.store.saveWorkbenchSettings({ theme: 'dark' } as never), /Invalid global settings/);
     assert.throws(() => f.store.saveWorkbenchSettings({ theme: 'sage', apiKey: 'secret' } as never), /Invalid global settings/);
     const restored = new WorkflowStore(path.join(f.tmp, 'workflow.json'));
-    assert.equal(restored.workbenchSettings().theme, 'warm'); assert.deepEqual(restored.metadata('p'), f.store.metadata('p'));
+    assert.equal(restored.workbenchSettings().theme, 'warm');
+    assert.equal(restored.workbenchSettings().toolsDirectory, tools); assert.equal(fs.existsSync(tools), false);
+    assert.throws(() => restored.saveWorkbenchSettings({ theme: 'warm', toolsDirectory: 'relative/tools' }), /absolute directory/);
+    restored.saveWorkbenchSettings({ theme: 'warm', toolsDirectory: '' });
+    assert.ok(path.isAbsolute(restored.workbenchSettings().toolsDirectory!)); assert.notEqual(restored.workbenchSettings().toolsDirectory, tools); assert.deepEqual(restored.metadata('p'), f.store.metadata('p'));
     assert.equal(restored.listEndpoints()[0].apiKey, undefined); assert.equal(restored.endpoint('local').apiKey, 'test-private-key');
     assert.equal(restored.get('p').paused, true);
   } finally { f.cleanup(); }
