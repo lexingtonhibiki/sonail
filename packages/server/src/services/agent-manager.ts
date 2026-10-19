@@ -734,7 +734,15 @@ Optional list of any work you did not complete or that should be followed up. Om
 
         if (!current()) { await session.abort(); await session.destroy(); return; }
         runEntry.session = session;
-        onStatusChange('executing');
+        // Persist execution before a fast result can publish its terminal state.
+        // Cancellation may arrive while the status callback is awaiting storage.
+        try {
+          await onStatusChange('executing');
+        } catch (err) {
+          if (current()) await session.destroy().catch(() => {});
+          throw err;
+        }
+        if (!current()) return;
 
         // Timeout guard. A task override is persisted with the card so retries
         // stay managed by Agent Board instead of escaping to a direct process.
