@@ -58,9 +58,28 @@ export function validateProfile(p: RoleProfile): void {
   if (p.endpointId && p.harness !== 'opencode') throw new Error('自定义接口通过 OpenCode 执行 / Custom endpoints require OpenCode');
 }
 export function parseJson<T>(text: string): T {
-  const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const source = match ? match[1] : text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-  return JSON.parse(source) as T;
+  try { return JSON.parse(text) as T; } catch { /* Try the supported response wrappers. */ }
+  const objectStart = text.indexOf('{');
+  const objectSource = text.slice(objectStart, text.lastIndexOf('}') + 1);
+  const opening = /```(?:json)?\s*/.exec(text);
+  if (opening && objectStart >= 0 && objectStart < opening.index) {
+    // A fence inside an otherwise valid prose-wrapped object is data, not a wrapper.
+    try { return JSON.parse(objectSource) as T; } catch { /* The fence may be the actual wrapper. */ }
+  }
+  if (opening) {
+    const start = opening.index + opening[0].length;
+    let quoted = false; let escaped = false;
+    for (let end = start; end < text.length; end++) {
+      const character = text[end];
+      if (escaped) { escaped = false; continue; }
+      if (quoted && character === '\\') { escaped = true; continue; }
+      if (character === '"') { quoted = !quoted; continue; }
+      // Only a fence outside a JSON string can close the response wrapper.
+      if (!quoted && text.startsWith('```', end)) return JSON.parse(text.slice(start, end)) as T;
+    }
+    return JSON.parse(text.slice(start)) as T;
+  }
+  return JSON.parse(objectSource) as T;
 }
 export function validateProposal(p: Proposal): void {
   if (p?.originalIdea !== undefined && (typeof p.originalIdea !== 'string' || !p.originalIdea.trim())) throw new Error('原始需求应为非空文字 / Original request must be nonempty text');

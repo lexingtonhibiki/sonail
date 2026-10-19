@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { defaults, selectProfile, validateAssessment, validateProposal, mayAutoAccept, type Assessment, type TaskPolicy } from '../../../shared/workflow.js';
-import { endpointConfig, effortFor, openCodeRequest } from '../src/services/harness.js';
+import { HarnessProvider, endpointConfig, effortFor, openCodeRequest } from '../src/services/harness.js';
 import { WorkflowStore } from '../src/services/workflow-store.js';
 import { Workflow, git, workspaceDigest } from '../src/services/workflow.js';
 import { AgentManager } from '../src/services/agent-manager.js';
@@ -438,4 +438,42 @@ test('project filters select latest ten before pin ordering and combine category
   assert.deepEqual(filterProjects(projects, 'archived', '', '').map(p => p.id), ['14']);
   assert.deepEqual(filterProjects(projects, 'completed', '', '').map(p => p.id), ['13']);
   assert.equal(filterProjects(projects, 'recent', '', '').length, 10);
+});
+
+// Combined-candidate diagnostic: PR1 fenced provider output meets PR2 durable execution ordering.
+test('combined candidate preserves fenced review evidence and human gate after delayed executor persistence', { timeout: 10000 }, async t => {
+  const human = [...criteria, { id: 'A2', text: 'User finds the README clear', kind: 'human' as const }];
+  const fenced = 'Inspect example:\n```sh\nnpm test\n```';
+  const report: Assessment = { ...pass, summary: fenced, criteria: [...pass.criteria, { id: 'A2', status: 'human', evidence: fenced }], humanChecks: ['Read README and confirm clarity'] };
+  const roles: string[] = [];
+  const f = fixture((_profile: unknown, role: string) => ({ start: async () => {}, stop: async () => {}, createSession: async (config: { onEvent: (e: unknown) => void }) => ({ execute: async () => {
+    roles.push(role); config.onEvent({ type: 'output', content: '```json\n' + JSON.stringify(report) + '\n```' }); return { status: 'complete' };
+  }, abort: async () => {}, destroy: async () => {} }) }));
+  const entered = deferred<void>(); const release = deferred<void>(); let executions = 0;
+  try {
+    f.p.tasks.t.criteria = human;
+    f.engine.saveSettings('p', { fullManaged: true });
+    f.p.roles.executor.harness = 'opencode';
+    const internals = f.agents as unknown as { providers: Map<string, unknown>; availableAgents: unknown[] };
+    internals.providers.set('opencode', { displayName: 'Offline combined fixture', createSession: async () => ({ execute: async () => { executions++; return { status: 'complete' }; }, abort: async () => {}, destroy: async () => {} }) });
+    internals.availableAgents = [{ name: 'opencode', available: true }];
+    t.mock.method(HarnessProvider.prototype, 'start', async () => {});
+    t.mock.method(HarnessProvider.prototype, 'createSession', async () => ({ execute: async () => { executions++; return { status: 'complete' }; }, abort: async () => {}, destroy: async () => {} }));
+    const update = f.repo.update.bind(f.repo);
+    f.repo.update = async (id, patch) => { if (patch.agentStatus === 'executing') { entered.resolve(); await release.promise; } return update(id, patch); };
+    await f.engine.start('p', 't');
+    await entered.promise;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(executions, 0, 'provider must wait for durable executing status');
+    release.resolve();
+    for (let i = 0; i < 200 && f.p.tasks.t.phase !== 'awaiting-user'; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(executions, 1); assert.equal(f.tasks.get('t')!.agentStatus, 'complete');
+    assert.deepEqual(roles, ['reviewer', 'manager']);
+    assert.equal(f.p.tasks.t.reviewer!.summary, fenced); assert.equal(f.p.tasks.t.manager!.summary, fenced);
+    assert.equal(f.p.tasks.t.phase, 'awaiting-user'); assert.equal(f.p.tasks.t.acceptedAt, undefined); assert.equal(f.p.tasks.t.mergedAt, undefined);
+    await assert.rejects(f.engine.accept('p', 't', true));
+    await assert.rejects(f.engine.merge('p', 't'));
+    await f.engine.accept('p', 't'); assert.equal(f.p.tasks.t.phase, 'accepted');
+    await f.engine.merge('p', 't'); assert.equal(f.p.tasks.t.phase, 'integrated');
+  } finally { release.resolve(); await f.engine.shutdown(); f.cleanup(); }
 });
