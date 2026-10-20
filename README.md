@@ -22,6 +22,8 @@ A local AI project workbench · project manager · independent review · human a
 
 > **0.1 preview, Windows first.** An MIT derivative of [AI Agent Board](https://github.com/DanWahlin/ai-agent-board). GIFs show real UI interactions with seeded demo tasks, not a model run or automatic acceptance.
 
+- **Structured write scope:** optional exact-file/directory delivery gates, checked before review and acceptance. Not a runtime sandbox. [Guide](docs/WRITE_SCOPE.md)
+
 ## From an idea to an accountable delivery
 
 You know what you want. You may not want to interpret every test log or technical criterion. Sonail gives the project a manager, executor and separate reviewer, with visible conclusions and next steps.

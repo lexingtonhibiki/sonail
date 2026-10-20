@@ -9,6 +9,7 @@ export interface Endpoint {
 }
 export interface Criterion { id: string; text: string; kind: 'objective' | 'human'; }
 export interface ProposalTask {
+  allowedWritePaths?: string[];
   title: string; description: string; criteria: Criterion[]; dependsOn: number[]; complexity: 'small' | 'standard' | 'deep';
 }
 export interface Proposal { originalIdea?: string; productSpec: string; technicalSpec: string; tasks: ProposalTask[]; }
@@ -24,6 +25,7 @@ export interface Assessment {
 }
 export interface ManagerRecord { id: string; at: number; taskId?: string; kind: 'assessment' | 'attention' | 'task-change' | 'authorization' | 'plan'; summary: string; assessment?: Assessment; before?: string; after?: string; }
 export interface TaskPolicy {
+  allowedWritePaths?: string[];
   criteria: Criterion[]; dependsOn: string[]; complexity: 'small' | 'standard' | 'deep';
   override?: RoleProfile; rounds: number; phase: string;
   reviewer?: Assessment; manager?: Assessment; digest?: string; specRevision?: number; reviewBaseCommit?: string;
@@ -86,9 +88,18 @@ export function validateProposal(p: Proposal): void {
   if (!p || typeof p.productSpec !== 'string' || !p.productSpec.trim() || typeof p.technicalSpec !== 'string' || !Array.isArray(p.tasks) || !p.tasks.length || p.tasks.length > 30) throw new Error('方案缺少产品说明或任务 / Invalid proposal');
   for (const [i, t] of p.tasks.entries()) {
     if (typeof t.title !== 'string' || !t.title.trim() || t.title.length > 200 || typeof t.description !== 'string' || t.description.length > 5000 || !['small', 'standard', 'deep'].includes(t.complexity)) throw new Error('任务内容无效 / Invalid task');
-    validateCriteria(t.criteria);
+    validateCriteria(t.criteria); validateAllowedWritePaths(t.allowedWritePaths);
     if (!Array.isArray(t.dependsOn) || t.dependsOn.some(d => !Number.isInteger(d) || d < 0 || d >= i) || new Set(t.dependsOn).size !== t.dependsOn.length) throw new Error('依赖必须引用前面的任务 / Dependencies must reference earlier tasks');
   }
+}
+/** v1: exact repository-relative files, or explicit trailing-slash directory prefixes. */
+export function validateAllowedWritePaths(value: unknown): asserts value is string[] | undefined {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length > 100 || value.some(p => typeof p !== 'string' || p.length > 500 || !validRepoPath(p.endsWith('/') ? p.slice(0, -1) : p) || /[*?\[\]{}$`;|&<>\r\n]/.test(p)) || new Set(value).size !== value.length) throw new Error('写入范围无效 / Invalid allowed write paths');
+}
+/** Validate spelling without resolving traversal or changing case. Also reject Windows forms. */
+export function validRepoPath(value: string): boolean {
+  return !!value && !/[\\\0:]/.test(value) && value.split('/').every(part => !!part && part !== '.' && part !== '..' && !/^\.git(?:[ .]|$)/i.test(part));
 }
 export function validateCriteria(criteria: Criterion[]): void {
   if (!Array.isArray(criteria) || !criteria.length || criteria.length > 30 || new Set(criteria.map(c => c.id)).size !== criteria.length || criteria.some(c => typeof c.id !== 'string' || !c.id || typeof c.text !== 'string' || !c.text.trim() || !['objective', 'human'].includes(c.kind))) throw new Error('需要明确验收条件 / Acceptance criteria required');
