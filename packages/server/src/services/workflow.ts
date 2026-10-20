@@ -162,7 +162,7 @@ export class Workflow {
     return p;
   }
   private async roleRun(id: string, role: Role, prompt: string, cwd: string, taskId?: string, complexity: TaskPolicy['complexity'] = 'deep'): Promise<string> {
-    const p = this.store.get(id); const profile = selectProfile(p.roles[role], complexity); validateProfile(profile);
+    const p = this.store.get(id); const profile = selectProfile(p.roles[role], complexity, role); validateProfile(profile);
     const runId = `${role}-${randomUUID()}`;
     this.event(id, role, `${profile.harness} · ${profile.model} · ${profile.effort}`, taskId);
     const provider = this.providerFactory(profile, role);

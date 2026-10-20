@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { defaults, selectProfile, validateAssessment, validateProposal, mayAutoAccept, type Assessment, type TaskPolicy } from '../../../shared/workflow.js';
+import { defaults, selectProfile, validateProfile, validateAssessment, validateProposal, mayAutoAccept, type Assessment, type TaskPolicy } from '../../../shared/workflow.js';
 import { endpointConfig, effortFor, openCodeRequest } from '../src/services/harness.js';
 import { WorkflowStore } from '../src/services/workflow-store.js';
 import { Workflow, git, workspaceDigest } from '../src/services/workflow.js';
@@ -438,4 +438,110 @@ test('project filters select latest ten before pin ordering and combine category
   assert.deepEqual(filterProjects(projects, 'archived', '', '').map(p => p.id), ['14']);
   assert.deepEqual(filterProjects(projects, 'completed', '', '').map(p => p.id), ['13']);
   assert.equal(filterProjects(projects, 'recent', '', '').length, 10);
+});
+
+test('role-aware selection preserves explicit models and uses configured capability order', () => {
+  const profile = { ...defaults().roles.executor, model: 'manual', effort: 'medium', auto: true, candidates: [
+    { model: 'local/worker', effort: 'low' }, { model: 'custom/middle', effort: 'high' }, { model: 'custom/oversight', effort: 'xhigh' },
+  ] };
+  const original = structuredClone(profile);
+  for (const complexity of ['small', 'standard', 'deep'] as const) {
+    for (const role of ['manager', 'reviewer'] as const) {
+      const selected = selectProfile(profile, complexity, role);
+      assert.equal(selected.model, 'custom/oversight'); assert.equal(selected.effort, 'xhigh');
+    }
+  }
+  assert.equal(selectProfile(profile, 'small', 'executor').model, 'local/worker');
+  assert.equal(selectProfile(profile, 'standard', 'executor').model, 'custom/middle');
+  assert.equal(selectProfile(profile, 'deep', 'executor').model, 'custom/oversight');
+  assert.equal(selectProfile({ ...profile, auto: false }, 'small', 'reviewer').model, 'manual');
+  assert.equal(selectProfile({ ...profile, candidates: [] }, 'small', 'reviewer').model, 'manual');
+  assert.deepEqual(profile, original);
+});
+
+test('small worker repairs retain lightweight execution while review and format retry use strongest allowed profiles', async () => {
+  const calls: { role: string; model: string; effort: string }[] = [];
+  let reviewerCalls = 0;
+  const revise: Assessment = { ...pass, verdict: 'revise', summary: 'Fix README', revision: 'Add missing introduction' };
+  const f = fixture((profile: { model: string; effort: string }, role: string) => {
+    calls.push({ role, model: profile.model, effort: profile.effort });
+    return { start: async () => {}, stop: async () => {}, createSession: async (config: { onEvent: (e: unknown) => void }) => ({ execute: async () => {
+      const response = role === 'reviewer' && ++reviewerCalls === 1 ? 'invalid JSON' : JSON.stringify(revise);
+      config.onEvent({ type: 'output', content: response }); return { status: 'complete' };
+    }, abort: async () => {}, destroy: async () => {} }) };
+  });
+  try {
+    for (const role of ['manager', 'reviewer', 'executor'] as const) Object.assign(f.p.roles[role], { auto: true, candidates: [
+      { model: `${role}/light`, effort: 'low' }, { model: `${role}/strong`, effort: 'high' },
+    ] });
+    let dispatched: Task | undefined;
+    f.agents.startAgent = task => { dispatched = task; };
+    await f.engine.review('p', 't');
+    assert.deepEqual(calls, [
+      { role: 'reviewer', model: 'reviewer/strong', effort: 'high' },
+      { role: 'reviewer', model: 'reviewer/strong', effort: 'high' },
+      { role: 'manager', model: 'manager/strong', effort: 'high' },
+    ]);
+    assert.equal(dispatched!.runProfile!.model, 'executor/light');
+    assert.equal(dispatched!.runProfile!.effort, 'low');
+    assert.equal(f.p.tasks.t.rounds, 1); assert.equal(f.p.tasks.t.acceptedAt, undefined);
+    await f.engine.pause('p');
+  } finally { f.cleanup(); }
+});
+
+test('fixed review profiles and explicit task executor override are not escalated', async () => {
+  const calls: string[] = [];
+  const revise: Assessment = { ...pass, verdict: 'revise', summary: 'Fix README', revision: 'Add introduction' };
+  const f = fixture((profile: { model: string }, role: string) => {
+    calls.push(`${role}:${profile.model}`);
+    return { start: async () => {}, stop: async () => {}, createSession: async (config: { onEvent: (e: unknown) => void }) => ({ execute: async () => { config.onEvent({ type: 'output', content: JSON.stringify(revise) }); return { status: 'complete' }; }, abort: async () => {}, destroy: async () => {} }) };
+  });
+  try {
+    for (const role of ['reviewer', 'manager'] as const) Object.assign(f.p.roles[role], { model: `${role}/fixed`, auto: false, candidates: [{ model: 'do-not-select', effort: 'high' }] });
+    f.p.tasks.t.override = { ...f.p.roles.executor, model: 'executor/fixed', auto: false };
+    let dispatched: Task | undefined; f.agents.startAgent = task => { dispatched = task; };
+    await f.engine.review('p', 't');
+    assert.deepEqual(calls, ['reviewer:reviewer/fixed', 'manager:manager/fixed']);
+    assert.equal(dispatched!.runProfile!.model, 'executor/fixed');
+    await f.engine.pause('p');
+  } finally { f.cleanup(); }
+});
+
+test('unavailable strongest reviewer fails explicitly without falling back to a weaker model', async () => {
+  const models: string[] = [];
+  const f = fixture((profile: { model: string }) => ({ start: async () => { models.push(profile.model); throw new Error('Selected model unavailable'); }, stop: async () => {} }));
+  try {
+    Object.assign(f.p.roles.reviewer, { auto: true, candidates: [{ model: 'available/light', effort: 'low' }, { model: 'unavailable/strong', effort: 'high' }] });
+    await assert.rejects(f.engine.review('p', 't'), /Selected model unavailable/);
+    assert.deepEqual(models, ['unavailable/strong']); assert.equal(f.p.tasks.t.phase, 'blocked');
+    assert.equal(f.p.tasks.t.acceptedAt, undefined); assert.equal(f.engine.active.size, 0);
+  } finally { f.cleanup(); }
+});
+
+test('pausing strongest reviewer preparation prevents execution, fallback, and manager dispatch', async () => {
+  const ready = deferred<void>(); const release = deferred<void>(); const calls: string[] = [];
+  const f = fixture((profile: { model: string }, role: string) => ({
+    start: async () => { calls.push(`${role}:${profile.model}`); ready.resolve(); await release.promise; },
+    stop: async () => {}, createSession: async () => { throw new Error('Cancelled review must not create a session'); },
+  }));
+  try {
+    Object.assign(f.p.roles.reviewer, { auto: true, candidates: [{ model: 'light', effort: 'low' }, { model: 'strong', effort: 'high' }] });
+    const reviewing = f.engine.review('p', 't'); await ready.promise;
+    await f.engine.pause('p'); release.resolve(); await reviewing;
+    assert.deepEqual(calls, ['reviewer:strong']); assert.equal(f.p.tasks.t.phase, 'interrupted');
+    assert.equal(f.p.tasks.t.reviewer, undefined); assert.equal(f.p.tasks.t.manager, undefined);
+    assert.equal(f.p.tasks.t.acceptedAt, undefined); assert.equal(f.engine.active.size, 0);
+  } finally { release.resolve(); f.cleanup(); }
+});
+
+
+test('missing profiles and malformed strongest candidates fail explicitly instead of selecting manual fallback', () => {
+  const profile = { ...defaults().roles.reviewer, auto: true };
+  assert.throws(() => selectProfile(undefined as never, 'small', 'reviewer'), /Select harness and model/);
+  assert.throws(() => selectProfile({ ...profile, candidates: undefined } as never, 'small', 'reviewer'), /Invalid selection or timeout/);
+  for (const malformed of [null, {}, [], 'strong', { effort: 'high' }, { model: 'strong' }, { model: '', effort: 'high' }]) {
+    const invalid = { ...profile, candidates: [{ model: 'light', effort: 'low' }, malformed] } as never;
+    assert.throws(() => validateProfile(invalid), /Candidate requires explicit model and effort/);
+    assert.throws(() => selectProfile(invalid, 'small', 'reviewer'), /Candidate requires explicit model and effort/);
+  }
 });
