@@ -15,6 +15,7 @@ import {
   type WorktreeCleanupInspection,
   type WorktreeCleanupResult,
 } from './worktree-cleanup.js';
+import { getUsageEvidence } from './usage.js';
 import { HarnessProvider } from './harness.js';
 import { UPLOADS_DIR } from '../routes/attachments.js';
 import type { AttachmentStore } from '../repositories/attachment-types.js';
@@ -117,6 +118,8 @@ export class AgentManager {
   private stoppedTasks = new Set<string>();
   private eventLogs = new Map<string, AgentEvent[]>();
   private eventRepo: TaskRepository | null = null;
+  private usageRecorder?: (projectId: string, taskId: string, usage: import('../../../../shared/usage.js').UsageEvidence, mayRecord: () => boolean) => void | Promise<void>;
+  setUsageRecorder(recorder: NonNullable<AgentManager['usageRecorder']>): void { this.usageRecorder = recorder; }
   private redact = (text: string) => text;
   setRedactor(redact: (text: string) => string): void { this.redact = redact; }
   private redactValue(value: unknown): unknown {
@@ -501,6 +504,7 @@ export class AgentManager {
   ): void {
     if (this.sessions.has(task.id)) return;
 
+    const usageProjectId = task.projectId; const usageTaskId = task.id;
     const agentType = task.agentType || 'copilot';
     const sessionStartTime = Date.now();
     let terminated = false;
@@ -655,7 +659,17 @@ Optional list of any work you did not complete or that should be followed up. Om
           repoPath: task.repoPath,
           systemPrompt,
           onEvent: (coreEvent: CoreAgentEvent) => {
-            if (!current()) return;
+            const usage = getUsageEvidence(coreEvent.metadata);
+            if (usage?.role === 'executor' && !this.deletedTasks.has(usageTaskId)) {
+              void Promise.resolve().then(() => this.usageRecorder?.(usageProjectId, usageTaskId, usage, () => !this.deletedTasks.has(usageTaskId))).catch(error => console.error(`[agent-manager] failed to persist usage evidence: ${errorMessage(error)}`));
+            }
+            // Usage is evidence only, not a status transition. Retain a final
+            // report even when cancellation invalidated this run's callbacks.
+            if (!current()) {
+              const usage = getUsageEvidence(coreEvent.metadata);
+              if (usage) this.emitEvent(task.id, { id: coreEvent.id, taskId: task.id, type: 'tool_call', content: '用量证据（非完整账单） / Usage evidence (not a complete bill)', timestamp: coreEvent.timestamp, metadata: { sonailUsage: usage } });
+              return;
+            }
             const metadata: Record<string, unknown> = { ...coreEvent.metadata };
             let eventType = coreEvent.type;
             let content = coreEvent.content;
