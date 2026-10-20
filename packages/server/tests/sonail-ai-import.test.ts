@@ -29,7 +29,7 @@ async function fixture() {
   const repository = { getAll: async (_archived: boolean, id: string) => [...tasks.values()].filter(task => task.projectId === id), getById: async (id: string) => tasks.get(id), create: async (task: Task) => { tasks.set(task.id, task); return task; }, delete: async (id: string) => tasks.delete(id) } as unknown as TaskRepository;
   const project = { id: 'p', name: 'Scope test', repoPath, defaultBaseBranch: 'main' };
   const projects = { getById: async (id: string) => id === 'p' ? project : undefined } as unknown as ProjectRepository;
-  const engine = new Workflow(new WorkflowStore(path.join(temporary, 'workflow.json')), repository, projects, { setRedactor() {} } as unknown as AgentManager);
+  const engine = new Workflow(new WorkflowStore(path.join(temporary, 'workflow.json')), repository, projects, { setRedactor() {}, setUsageRecorder() {} } as unknown as AgentManager);
   const app = express(); app.use(express.json()); app.use('/api', authMiddleware); app.use('/api/workflow', workflowRouter(engine)); app.use('/api/ai', aiIntegrationRouter(engine));
   const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
   const address = server.address() as { port: number }; const url = `http://127.0.0.1:${address.port}`;

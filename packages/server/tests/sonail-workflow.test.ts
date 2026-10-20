@@ -439,3 +439,95 @@ test('project filters select latest ten before pin ordering and combine category
   assert.deepEqual(filterProjects(projects, 'completed', '', '').map(p => p.id), ['13']);
   assert.equal(filterProjects(projects, 'recent', '', '').length, 10);
 });
+
+test('review and manager correction preserve distinct usage attempts across reload without accepting human criteria', async () => {
+  const human = [...criteria, { id: 'A2', text: 'User reads document', kind: 'human' as const }];
+  const base = { ...pass, criteria: [...pass.criteria, { id: 'A2', status: 'human', evidence: 'User needed' }], humanChecks: ['Read document'] };
+  let managers = 0; let attempts = 0;
+  const f = fixture((_profile: unknown, role: string) => ({ start: async () => {}, stop: async () => {}, createSession: async (config: { onEvent: (e: unknown) => void }) => ({ execute: async () => {
+    const firstManager = role === 'manager' && ++managers === 1;
+    config.onEvent({ type: 'output', content: JSON.stringify({ ...base, findings: firstManager ? ['advisory only'] : [] }) });
+    config.onEvent({ type: 'tool_call', content: 'Usage evidence', metadata: { sonailUsage: { version: 1, attemptId: `fixture-${++attempts}`, role, harness: 'codex', selectedModel: 'fixture-model', effort: 'default', outcome: 'complete', reports: [{ source: 'codex.turn.completed', scope: 'turn', semantics: 'snapshot', tokens: { input_tokens: attempts }, cost: null, invalidFields: [] }] } } });
+    return { status: 'complete' };
+  }, abort: async () => {}, destroy: async () => {} }) }));
+  try {
+    f.p.tasks.t.criteria = human;
+    await f.engine.review('p', 't');
+    const events = new WorkflowStore(f.store.file).get('p').events.filter(e => e.usage);
+    assert.deepEqual(events.map(e => e.role), ['reviewer', 'manager', 'manager']);
+    assert.equal(new Set(events.map(e => e.usage!.attemptId)).size, 3);
+    assert.ok(events.every(e => e.taskId === 't' && e.usage!.reports[0].cost === null));
+    assert.equal(f.p.tasks.t.acceptedAt, undefined); assert.equal(f.p.tasks.t.phase, 'awaiting-user');
+  } finally { f.cleanup(); }
+});
+
+test('late cancelled executor usage persists with old identity without affecting replacement output or status', { timeout: 5000 }, async () => {
+  const f = fixture(); const firstEntered = deferred<void>(); const secondEntered = deferred<void>();
+  const firstRelease = deferred<void>(); const secondRelease = deferred<void>(); const finished = deferred<void>();
+  let firstEmit!: (e: unknown) => void; let calls = 0; const saved: any[] = []; const statuses: string[] = [];
+  try {
+    f.agents.initEventPersistence({ ...f.repo, insertEvent: async (e: unknown) => { saved.push(e); }, getEventsByTaskId: async () => saved, deleteEventsByTaskId: async () => { saved.length = 0; } } as unknown as TaskRepository);
+    const internals = f.agents as unknown as { providers: Map<string, unknown>; availableAgents: unknown[] };
+    internals.providers.set('opencode', { displayName: 'Offline', createSession: async (config: { onEvent: (e: unknown) => void }) => {
+      const first = ++calls === 1; if (first) firstEmit = config.onEvent;
+      return { execute: async () => { (first ? firstEntered : secondEntered).resolve(); await (first ? firstRelease : secondRelease).promise; return { status: 'complete' }; }, abort: async () => {}, destroy: async () => {} };
+    } }); internals.availableAgents = [{ name: 'opencode', available: true }];
+    const task = { ...f.tasks.get('t')!, agentType: 'opencode' as const };
+    f.agents.startAgent(task, () => {}); await firstEntered.promise; await f.agents.stopAgent('t');
+    f.agents.startAgent(task, status => { statuses.push(status); if (status === 'complete') finished.resolve(); }); await secondEntered.promise;
+    const usage = { version: 1, attemptId: 'old-attempt', role: 'executor', harness: 'codex', selectedModel: 'old-model', effort: 'default', outcome: 'failed', reports: [] };
+    firstEmit({ id: 'old-usage', type: 'output', content: 'stale output must not accumulate', timestamp: Date.now(), metadata: { sonailUsage: usage } });
+    firstEmit({ id: 'old-prose', type: 'output', content: 'ignored stale prose', timestamp: Date.now() });
+    firstRelease.resolve(); await new Promise(r => setImmediate(r));
+    assert.equal(f.agents.isRunning('t'), true); assert.equal(statuses.includes('complete'), false);
+    assert.equal(saved.filter(e => e.id === 'old-usage').length, 1);
+    assert.deepEqual(saved.find(e => e.id === 'old-usage').metadata.sonailUsage, usage);
+    assert.equal(saved.some(e => e.id === 'old-prose'), false);
+    assert.equal(saved.some(e => /stale output/.test(e.content)), false);
+    assert.equal(f.p.events.filter(e => e.usage?.attemptId === 'old-attempt').length, 1);
+    firstEmit({ id: 'old-usage-duplicate', type: 'tool_call', content: 'Usage evidence', timestamp: Date.now(), metadata: { sonailUsage: usage } });
+    await new Promise(r => setImmediate(r));
+    assert.equal(f.p.events.filter(e => e.usage?.attemptId === 'old-attempt').length, 1);
+    f.agents.resetEvents('t'); await new Promise(r => setImmediate(r));
+    assert.equal(saved.length, 0);
+    assert.equal(new WorkflowStore(f.store.file).get('p').events.filter(e => e.usage?.attemptId === 'old-attempt').length, 1);
+    secondRelease.resolve(); await finished.promise;
+    assert.equal(f.tasks.get('t')!.summary?.includes('stale'), undefined);
+  } finally { firstRelease.resolve(); secondRelease.resolve(); f.cleanup(); }
+});
+
+test('usage persistence redacts model strings without corrupting matching numeric counters', () => {
+  const f = fixture(); try {
+    f.store.saveEndpoint({ id: 'numeric', name: 'Fixture', protocol: 'openai', baseUrl: 'http://localhost:9000', apiKey: '123' });
+    f.store.event('p', { role: 'manager', type: 'usage', content: 'Usage evidence', usage: { version: 1, attemptId: 'fixture', role: 'manager', harness: 'codex', selectedModel: 'model-123', effort: 'default', outcome: 'complete', reports: [{ source: 'codex.turn.completed', scope: 'turn', semantics: 'snapshot', tokens: { input_tokens: 123 }, cost: null, invalidFields: [] }] } });
+    const usage = new WorkflowStore(f.store.file).get('p').events.at(-1)!.usage!;
+    assert.equal(usage.selectedModel, 'model-[REDACTED]'); assert.equal(usage.reports[0].tokens.input_tokens, 123);
+  } finally { f.cleanup(); }
+});
+
+
+test('executor usage cannot create missing workflow projects or revive a deleted project', async () => {
+  const f = fixture(); try {
+    const usage = { version: 1 as const, attemptId: 'deleted-project', role: 'executor' as const, harness: 'codex' as const, selectedModel: 'fixture', effort: 'default', outcome: 'failed' as const, reports: [] };
+    f.store.recordUsage('never-created', 't', usage);
+    assert.equal(fs.existsSync(f.store.file), false);
+    const internals = f.agents as unknown as { usageRecorder: (project: string, task: string, usage: unknown, mayRecord: () => boolean) => Promise<void> };
+    const workflow = f.engine as unknown as { projects: ProjectRepository };
+    workflow.projects.getById = async () => undefined;
+    await internals.usageRecorder('p', 't', usage, () => true);
+    assert.equal(f.p.events.some(e => e.usage), false);
+  } finally { f.cleanup(); }
+});
+
+
+test('executor usage rechecks deletion after asynchronous project lookup', async () => {
+  const f = fixture(); const lookup = deferred<any>(); let allowed = true;
+  try {
+    const internals = f.agents as unknown as { usageRecorder: (project: string, task: string, usage: unknown, mayRecord: () => boolean) => Promise<void> };
+    const workflow = f.engine as unknown as { projects: ProjectRepository };
+    workflow.projects.getById = async () => lookup.promise;
+    const recording = internals.usageRecorder('p', 't', { version: 1, attemptId: 'late-deleted', role: 'executor', harness: 'codex', selectedModel: 'fixture', effort: 'default', outcome: 'failed', reports: [] }, () => allowed);
+    allowed = false; lookup.resolve({ id: 'p' }); await recording;
+    assert.equal(f.p.events.some(e => e.usage), false);
+  } finally { lookup.resolve(undefined); f.cleanup(); }
+});

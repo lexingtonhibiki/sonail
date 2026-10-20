@@ -4,10 +4,11 @@ import os from 'node:os';
 import { HarnessProvider } from '../src/services/harness.js';
 import { AgentManager } from '../src/services/agent-manager.js';
 import { defaults } from '../../../shared/workflow.js';
+import type { UsageEvidence } from '../../../shared/usage.js';
 import type { Task } from '../src/types.js';
 
 async function codexRun(sequence: unknown[]) {
-  const events: { type: string; content: string }[] = [];
+  const events: { type: string; content: string; metadata?: Record<string, unknown> }[] = [];
   let options: unknown;
   const provider = new HarnessProvider({ ...defaults().roles.manager, harness: 'codex', model: 'gpt-6-luna', effort: 'xhigh' }, 'manager', undefined, async () => ({
     startThread(input: unknown) {
@@ -51,4 +52,29 @@ test('executor rejects unsupported effort before launching a native session', { 
   await new Promise<void>(resolve => manager.startAgent(task, status => { if (status === 'failed') resolve(); }));
   assert.equal(manager.isRunning(task.id), false);
   assert.ok((await manager.getEvents(task.id)).some(e => /Codex supports xhigh/.test(e.content)));
+});
+
+function evidence(run: Awaited<ReturnType<typeof codexRun>>) {
+  return run.events.filter(e => e.metadata?.sonailUsage).map(e => e.metadata!.sonailUsage as UsageEvidence);
+}
+test('each invocation reports usage once with distinct attempt identity and selected role/model', async () => {
+  const sequence = [{ type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 2, cached_input_tokens: 0 } }];
+  const a = evidence(await codexRun(sequence)); const b = evidence(await codexRun(sequence));
+  assert.equal(a.length, 1); assert.equal(b.length, 1); assert.notEqual(a[0].attemptId, b[0].attemptId);
+  assert.equal(a[0].role, 'manager'); assert.equal(a[0].selectedModel, 'gpt-6-luna'); assert.equal(a[0].outcome, 'complete');
+  assert.equal(a[0].reports[0].tokens.input_tokens, 5); assert.equal(a[0].reports[0].cost, null);
+});
+test('failure after usage retains the reported snapshot but not a successful outcome', async () => {
+  const run = await codexRun([{ type: 'turn.completed', usage: { input_tokens: 7 } }, { type: 'turn.failed', error: { message: 'later failure' } }]);
+  assert.equal(run.result.status, 'failed'); const records = evidence(run); assert.equal(records.length, 1);
+  assert.equal(records[0].outcome, 'failed'); assert.equal(records[0].reports[0].tokens.input_tokens, 7);
+});
+test('failed invocation without provider usage remains explicitly unknown', async () => {
+  const records = evidence(await codexRun([{ type: 'turn.failed', error: { message: 'failure' } }]));
+  assert.equal(records.length, 1); assert.equal(records[0].outcome, 'failed'); assert.deepEqual(records[0].reports, []);
+});
+test('multiple terminal snapshots are preserved, never summed as deltas', async () => {
+  const records = evidence(await codexRun([{ type: 'turn.completed', usage: { input_tokens: 4 } }, { type: 'turn.completed', usage: { input_tokens: 8 } }]));
+  assert.equal(records.length, 1); assert.deepEqual(records[0].reports.map(r => r.tokens.input_tokens), [4, 8]);
+  assert.ok(records[0].reports.every(r => r.semantics === 'snapshot'));
 });
