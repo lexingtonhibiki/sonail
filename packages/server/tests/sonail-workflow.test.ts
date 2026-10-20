@@ -57,7 +57,7 @@ test('real review flow repairs contradictory optional findings once and waits fo
     config.onEvent({ type: 'output', content: JSON.stringify({ ...base, findings: role === 'manager' ? findings : [] }) }); return { status: 'complete' };
   }, abort: async () => {}, destroy: async () => {} }) }));
   try {
-    f.p.tasks.t.criteria = human; f.engine.saveSettings('p', { fullManaged: true });
+    f.p.tasks.t.criteria = human; f.p.tasks.t.allowedWritePaths = ['README.md']; f.engine.saveSettings('p', { fullManaged: true });
     await f.engine.review('p', 't');
     assert.equal(managers, 2); assert.equal(f.p.tasks.t.phase, 'awaiting-user'); assert.equal(f.p.tasks.t.acceptedAt, undefined);
     assert.equal(f.p.managerRecords.filter(r => r.kind === 'assessment').length, 1); assert.equal(f.p.tasks.t.attention, undefined);
@@ -544,4 +544,287 @@ test('missing profiles and malformed strongest candidates fail explicitly instea
     assert.throws(() => validateProfile(invalid), /Candidate requires explicit model and effort/);
     assert.throws(() => selectProfile(invalid, 'small', 'reviewer'), /Candidate requires explicit model and effort/);
   }
+});
+
+// Scope checks deliberately exercise real Git state, not executor claims or mocked diffs.
+function seedScopeFiles(f: ReturnType<typeof fixture>, files: Record<string, string>) {
+  for (const [name, contents] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(f.main, name)), { recursive: true });
+    fs.writeFileSync(path.join(f.main, name), contents);
+  }
+  git(f.main, ['add', '-A']); git(f.main, ['commit', '-m', 'Seed scope fixtures']);
+  git(f.wt, ['merge', 'main', '--no-edit']);
+}
+
+test('write scope survives import preview, publishing, reload and omitted edits', async () => {
+  const f = fixture(); try {
+    delete f.p.tasks.t;
+    const scoped = { ...proposal, tasks: [{ ...proposal.tasks[0], allowedWritePaths: ['README.md', 'docs/'] }] };
+    const context = await f.engine.importContext('p');
+    await f.engine.previewImport('p', scoped, context.revision, context.fingerprint, 'scope test');
+    assert.deepEqual(f.p.proposal!.tasks[0].allowedWritePaths, ['README.md', 'docs/']);
+    const [id] = await f.engine.publish('p');
+    assert.deepEqual(f.p.tasks[id].allowedWritePaths, ['README.md', 'docs/']);
+    await f.engine.editTask('p', id, { title: 'Revised title', description: 'Same scope', criteria });
+    assert.deepEqual(f.p.tasks[id].allowedWritePaths, ['README.md', 'docs/']);
+    const reloaded = new WorkflowStore(path.join(f.tmp, 'workflow.json'));
+    assert.deepEqual(reloaded.get('p').tasks[id].allowedWritePaths, ['README.md', 'docs/']);
+    await f.engine.editTask('p', id, { title: 'Read only', description: 'Inspect only', criteria, allowedWritePaths: [] });
+    assert.deepEqual(f.p.tasks[id].allowedWritePaths, []);
+  } finally { f.cleanup(); }
+});
+
+for (const invalid of [null, 'README.md', [''], ['/README.md'], ['../README.md'], ['docs/../README.md'], ['./README.md'], ['docs//file'], ['*.md'], ['docs/**'], ['a\\b'], ['a\0b']]) {
+  test(`write scope rejects malformed server input ${JSON.stringify(invalid)}`, async () => {
+    const f = fixture(); try {
+      const malformed = { ...proposal, tasks: [{ ...proposal.tasks[0], allowedWritePaths: invalid }] };
+      assert.throws(() => validateProposal(malformed as never));
+      await assert.rejects(f.engine.editTask('p', 't', { title: 'Task', description: 'Update README', criteria, allowedWritePaths: invalid } as never));
+      assert.equal(f.p.tasks.t.allowedWritePaths, undefined);
+    } finally { f.cleanup(); }
+  });
+}
+
+test('write scope allows exact README changes through review, human acceptance and local integration', async () => {
+  const f = fixture(); try {
+    f.p.tasks.t.allowedWritePaths = ['README.md'];
+    fs.writeFileSync(path.join(f.wt, 'README.md'), 'Scoped delivery\n');
+    await f.engine.review('p', 't');
+    assert.equal(f.p.tasks.t.phase, 'awaiting-user'); assert.equal(f.p.tasks.t.acceptedAt, undefined);
+    await f.engine.accept('p', 't'); await f.engine.merge('p', 't');
+    assert.equal(fs.readFileSync(path.join(f.main, 'README.md'), 'utf8'), 'Scoped delivery\n');
+  } finally { f.cleanup(); }
+});
+
+for (const state of ['committed', 'staged', 'unstaged', 'untracked'] as const) {
+  test(`write scope blocks ${state} out-of-scope content before review auto-commit`, async () => {
+    let calls = 0;
+    const f = fixture(() => { calls++; throw new Error('Provider must not run for a scope violation'); }); try {
+      seedScopeFiles(f, { 'outside.txt': 'Original\n' });
+      f.p.tasks.t.allowedWritePaths = ['README.md'];
+      const name = state === 'untracked' ? 'new-outside.txt' : 'outside.txt';
+      fs.writeFileSync(path.join(f.wt, name), 'Forbidden\n');
+      if (state === 'staged' || state === 'committed') git(f.wt, ['add', name]);
+      if (state === 'committed') git(f.wt, ['commit', '-m', 'Executor changed outside scope']);
+      const head = git(f.wt, ['rev-parse', 'HEAD']); const status = git(f.wt, ['status', '--porcelain']);
+      await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+      assert.equal(git(f.wt, ['rev-parse', 'HEAD']), head); assert.equal(git(f.wt, ['status', '--porcelain']), status);
+      assert.equal(f.p.tasks.t.acceptedAt, undefined); assert.equal(f.p.tasks.t.reviewer, undefined); assert.equal(calls, 0); assert.equal(f.p.tasks.t.phase, 'blocked');
+    } finally { f.cleanup(); }
+  });
+}
+
+for (const staged of [false, true]) {
+  test(`write scope blocks ${staged ? 'staged' : 'unstaged'} deletion`, async () => {
+    const f = fixture(); try {
+      f.p.tasks.t.allowedWritePaths = ['docs/']; fs.unlinkSync(path.join(f.wt, 'README.md'));
+      if (staged) git(f.wt, ['add', '-A']);
+      await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+    } finally { f.cleanup(); }
+  });
+}
+
+for (const allowedWritePaths of [['README.md'], ['renamed.md']]) {
+  test(`write scope checks both rename endpoints when only ${allowedWritePaths[0]} is allowed`, async () => {
+    const f = fixture(); try {
+      f.p.tasks.t.allowedWritePaths = allowedWritePaths;
+      git(f.wt, ['mv', 'README.md', 'renamed.md']);
+      git(f.wt, ['commit', '-m', 'Rename README']);
+      await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+    } finally { f.cleanup(); }
+  });
+}
+
+test('write scope handles NUL-delimited Git output for newline filenames', async () => {
+  const f = fixture(); try {
+    f.p.tasks.t.allowedWritePaths = ['docs/']; fs.mkdirSync(path.join(f.wt, 'docs'));
+    fs.writeFileSync(path.join(f.wt, 'docs/line\nbreak.md'), 'Allowed\n');
+    await f.engine.review('p', 't');
+    fs.writeFileSync(path.join(f.wt, 'outside\nREADME.md'), 'Not allowed\n');
+    await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+  } finally { f.cleanup(); }
+});
+
+test('write scope directory prefixes do not match sibling names or exact-file descendants', async () => {
+  for (const [scope, name] of [['docs/', 'docs-other/file.md'], ['docs', 'docs/file.md']]) {
+    const f = fixture(); try {
+      f.p.tasks.t.allowedWritePaths = [scope]; fs.mkdirSync(path.dirname(path.join(f.wt, name)), { recursive: true });
+      fs.writeFileSync(path.join(f.wt, name), 'Not allowed\n');
+      await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+    } finally { f.cleanup(); }
+  }
+});
+
+test('empty write scope permits unchanged review but rejects every changed path', async () => {
+  const f = fixture(); try {
+    f.p.tasks.t.allowedWritePaths = []; await f.engine.review('p', 't');
+    assert.equal(f.p.tasks.t.phase, 'awaiting-user');
+    fs.writeFileSync(path.join(f.wt, 'README.md'), 'Read-only violation\n');
+    await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+  } finally { f.cleanup(); }
+});
+
+for (const state of ['untracked', 'staged', 'committed'] as const) {
+  test(`write scope blocks a newly ${state} symlink even when its path is allowed`, async () => {
+    const f = fixture(); try {
+      f.p.tasks.t.allowedWritePaths = ['link']; fs.symlinkSync('README.md', path.join(f.wt, 'link'));
+      if (state !== 'untracked') git(f.wt, ['add', 'link']);
+      if (state === 'committed') git(f.wt, ['commit', '-m', 'Add symlink']);
+      await assert.rejects(f.engine.review('p', 't'), /symlink|symbolic|符号|scope/i);
+    } finally { f.cleanup(); }
+  });
+}
+
+test('write scope tolerates unchanged baseline symlinks but rejects a changed symlink target', async () => {
+  const f = fixture(); try {
+    fs.symlinkSync('README.md', path.join(f.main, 'link')); git(f.main, ['add', 'link']); git(f.main, ['commit', '-m', 'Existing symlink']); git(f.wt, ['merge', 'main', '--no-edit']);
+    f.p.tasks.t.allowedWritePaths = ['README.md', 'link']; fs.writeFileSync(path.join(f.wt, 'README.md'), 'Allowed\n');
+    await f.engine.review('p', 't');
+    fs.unlinkSync(path.join(f.wt, 'link')); fs.symlinkSync('elsewhere', path.join(f.wt, 'link'));
+    await assert.rejects(f.engine.review('p', 't'), /symlink|symbolic|符号|scope/i);
+  } finally { f.cleanup(); }
+});
+
+test('write scope does not misattribute newer upstream files to the task', async () => {
+  const f = fixture(); try {
+    f.p.tasks.t.allowedWritePaths = ['README.md']; fs.writeFileSync(path.join(f.wt, 'README.md'), 'Task delivery\n');
+    fs.writeFileSync(path.join(f.main, 'upstream.txt'), 'Other task\n'); git(f.main, ['add', '.']); git(f.main, ['commit', '-m', 'Advance base']);
+    await f.engine.review('p', 't');
+    assert.equal(fs.readFileSync(path.join(f.wt, 'upstream.txt'), 'utf8'), 'Other task\n');
+    await f.engine.accept('p', 't'); await f.engine.merge('p', 't');
+    assert.equal(fs.readFileSync(path.join(f.main, 'README.md'), 'utf8'), 'Task delivery\n');
+  } finally { f.cleanup(); }
+});
+
+test('write scope review rejects a baseline advance while the reviewer is running', async () => {
+  const entered = deferred<void>(); const release = deferred<void>();
+  const f = fixture(() => ({ start: async () => {}, stop: async () => {}, createSession: async (config: { onEvent: (e: unknown) => void }) => ({ execute: async () => { entered.resolve(); await release.promise; config.onEvent({ type: 'output', content: JSON.stringify(pass) }); return { status: 'complete' }; }, abort: async () => {}, destroy: async () => {} }) }));
+  try {
+    f.p.tasks.t.allowedWritePaths = ['README.md']; const reviewing = f.engine.review('p', 't'); await entered.promise;
+    fs.writeFileSync(path.join(f.main, 'upstream.txt'), 'Changed baseline\n'); git(f.main, ['add', '.']); git(f.main, ['commit', '-m', 'Advance during review']);
+    release.resolve(); await assert.rejects(reviewing, /base changed during review/i); assert.equal(f.p.tasks.t.acceptedAt, undefined);
+  } finally { release.resolve(); f.cleanup(); }
+});
+
+for (const operation of ['accept', 'merge'] as const) {
+  for (const mutation of ['scope', 'diff'] as const) {
+    test(`write scope blocks ${operation} after reviewed ${mutation} changes`, async () => {
+      const f = fixture(); try {
+        f.p.tasks.t.allowedWritePaths = ['README.md']; fs.writeFileSync(path.join(f.wt, 'README.md'), 'Reviewed\n');
+        await f.engine.review('p', 't'); if (operation === 'merge') await f.engine.accept('p', 't');
+        if (mutation === 'scope') f.p.tasks.t.allowedWritePaths = ['README.md', 'outside.txt'];
+        else { fs.writeFileSync(path.join(f.wt, 'outside.txt'), 'Unreviewed\n'); git(f.wt, ['add', '.']); git(f.wt, ['commit', '-m', 'After review']); }
+        await assert.rejects(f.engine[operation]('p', 't'), /stale|scope|allowed|范围/i);
+        assert.equal(f.p.tasks.t.mergedAt, undefined);
+      } finally { f.cleanup(); }
+    });
+  }
+}
+
+test('manager adjustment cannot expand write scope', () => {
+  const report = { ...pass, verdict: 'revise', revision: 'Expand scope', taskAdjustment: { reason: 'Need more files', instructions: 'Modify outside.txt', allowedWritePaths: ['outside.txt'] } };
+  assert.throws(() => validateAssessment(report as never, criteria), /Invalid task adjustment/);
+});
+
+test('write scope checks staged paths even when unstaged edits restore baseline contents', async () => {
+  const f = fixture(); try {
+    seedScopeFiles(f, { 'outside.txt': 'Original\n' }); f.p.tasks.t.allowedWritePaths = ['README.md'];
+    fs.writeFileSync(path.join(f.wt, 'outside.txt'), 'Forbidden staged contents\n'); git(f.wt, ['add', 'outside.txt']);
+    fs.writeFileSync(path.join(f.wt, 'outside.txt'), 'Original\n');
+    assert.equal(git(f.wt, ['diff', 'HEAD', '--', 'outside.txt']), '');
+    await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+  } finally { f.cleanup(); }
+});
+
+for (const state of ['untracked', 'staged', 'committed'] as const) {
+  test(`write scope preserves leading filename BOM in ${state} paths`, async () => {
+    const f = fixture(); try {
+      f.p.tasks.t.allowedWritePaths = ['safe']; const filename = '\uFEFFsafe';
+      fs.writeFileSync(path.join(f.wt, filename), 'Not the allowed filename\n');
+      if (state !== 'untracked') git(f.wt, ['add', filename]);
+      if (state === 'committed') git(f.wt, ['commit', '-m', 'Add BOM filename']);
+      await assert.rejects(f.engine.review('p', 't'), /scope|allowed|范围/i);
+      assert.equal(f.p.tasks.t.reviewer, undefined);
+    } finally { f.cleanup(); }
+  });
+}
+
+function seedGitlink(f: ReturnType<typeof fixture>) {
+  const initial = git(f.main, ['rev-parse', 'HEAD']);
+  git(f.main, ['update-index', '--add', '--cacheinfo', `160000,${initial},module`]);
+  git(f.main, ['commit', '-m', 'Seed existing gitlink']);
+  git(f.wt, ['merge', 'main', '--no-edit']);
+  return git(f.main, ['rev-parse', 'HEAD']);
+}
+
+for (const permitted of [false, true]) {
+  test(`write scope rejects changed ${permitted ? 'allowed' : 'outside'} gitlink despite diff.ignoreSubmodules=all`, async () => {
+    const f = fixture(); try {
+      const next = seedGitlink(f); f.p.tasks.t.allowedWritePaths = permitted ? ['module'] : ['README.md'];
+      git(f.wt, ['update-index', '--cacheinfo', `160000,${next},module`]); git(f.wt, ['commit', '-m', 'Change gitlink']);
+      git(f.wt, ['config', 'diff.ignoreSubmodules', 'all']);
+      assert.equal(git(f.wt, ['diff', '--raw', next, 'HEAD']), '');
+      await assert.rejects(f.engine.review('p', 't'), permitted ? /submodule|子模块/i : /scope|范围/i);
+      assert.equal(f.p.tasks.t.acceptedAt, undefined);
+    } finally { f.cleanup(); }
+  });
+}
+
+test('write scope permits an untouched baseline gitlink with ordinary allowed changes', async () => {
+  const f = fixture(); try {
+    seedGitlink(f); f.p.tasks.t.allowedWritePaths = ['README.md'];
+    fs.writeFileSync(path.join(f.wt, 'README.md'), 'Allowed file update\n');
+    await f.engine.review('p', 't'); assert.equal(f.p.tasks.t.phase, 'awaiting-user');
+  } finally { f.cleanup(); }
+});
+
+test('write scope acceptance detects staged allowed edits hidden by restored worktree contents', async () => {
+  const f = fixture(); try {
+    f.p.tasks.t.allowedWritePaths = ['README.md'];
+    fs.writeFileSync(path.join(f.wt, 'README.md'), 'Reviewed contents\n'); await f.engine.review('p', 't');
+    fs.writeFileSync(path.join(f.wt, 'README.md'), 'Unreviewed staged contents\n'); git(f.wt, ['add', 'README.md']);
+    fs.writeFileSync(path.join(f.wt, 'README.md'), 'Reviewed contents\n');
+    assert.equal(git(f.wt, ['diff', 'HEAD', '--', 'README.md']), '');
+    assert.notEqual(git(f.wt, ['diff', '--cached', 'HEAD', '--', 'README.md']), '');
+    await assert.rejects(f.engine.accept('p', 't'), /stale review/i);
+    assert.equal(f.p.tasks.t.acceptedAt, undefined);
+  } finally { f.cleanup(); }
+});
+
+for (const staged of [false, true]) {
+  test(`write scope acceptance detects changed allowed binary ${staged ? 'index' : 'worktree'} content`, async () => {
+    const f = fixture(); try {
+      f.p.tasks.t.allowedWritePaths = ['asset.bin'];
+      fs.writeFileSync(path.join(f.wt, 'asset.bin'), Buffer.from([0, 1, 2, 3])); await f.engine.review('p', 't');
+      fs.writeFileSync(path.join(f.wt, 'asset.bin'), Buffer.from([0, 1, 2, 4]));
+      if (staged) {
+        git(f.wt, ['add', 'asset.bin']);
+        fs.writeFileSync(path.join(f.wt, 'asset.bin'), Buffer.from([0, 1, 2, 3]));
+      }
+      await assert.rejects(f.engine.accept('p', 't'), /stale review/i);
+      assert.equal(f.p.tasks.t.acceptedAt, undefined);
+    } finally { f.cleanup(); }
+  });
+}
+
+test('write scope digest distinguishes binary payloads with identical textual Git diff summaries', () => {
+  const f = fixture(); try {
+    seedScopeFiles(f, { 'asset.bin': '\0baseline' }); f.p.tasks.t.allowedWritePaths = ['asset.bin'];
+    fs.writeFileSync(path.join(f.wt, 'asset.bin'), Buffer.from([0, 1, 2, 3]));
+    const firstSummary = git(f.wt, ['diff', '--numstat', 'HEAD', '--', 'asset.bin']);
+    const firstDigest = workspaceDigest(f.wt, f.p.tasks.t, f.p.revision);
+    fs.writeFileSync(path.join(f.wt, 'asset.bin'), Buffer.from([0, 1, 2, 4]));
+    assert.equal(git(f.wt, ['diff', '--numstat', 'HEAD', '--', 'asset.bin']), firstSummary);
+    assert.notEqual(workspaceDigest(f.wt, f.p.tasks.t, f.p.revision), firstDigest);
+  } finally { f.cleanup(); }
+});
+
+
+test('write scope excludes ignored files and does not claim runtime write protection', async () => {
+  const f = fixture(); try {
+    seedScopeFiles(f, { '.gitignore': 'ignored.tmp\n' }); f.p.tasks.t.allowedWritePaths = [];
+    fs.writeFileSync(path.join(f.wt, 'ignored.tmp'), 'Ignored content is outside the delivery gate');
+    await f.engine.review('p', 't'); assert.equal(f.p.tasks.t.phase, 'awaiting-user');
+    assert.equal(fs.readFileSync(path.join(f.wt, 'ignored.tmp'), 'utf8'), 'Ignored content is outside the delivery gate');
+  } finally { f.cleanup(); }
 });

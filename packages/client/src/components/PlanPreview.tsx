@@ -1,3 +1,4 @@
+import WriteScope from './WriteScope';
 import type { Proposal } from '../../../../shared/workflow.js';
 
 interface Props {
@@ -16,6 +17,7 @@ export default function PlanPreview({ proposal, source, projectName, repoPath, p
     <details><summary>{t('实现说明与执行边界', 'Implementation and execution boundaries')}</summary><p className="sb-preserve">{proposal.technicalSpec}</p></details>
     <ol>{proposal.tasks.map((task, index) => <li key={index}>
       <h3>{task.title}</h3>
+      <WriteScope paths={task.allowedWritePaths} t={t} />
       <p className="sb-muted">{task.dependsOn.length ? `${t('等待：', 'After: ')}${task.dependsOn.map(i => proposal.tasks[i].title).join(' · ')}` : t('没有前置任务，可首先执行', 'No dependencies; can run first')}</p>
       {task.criteria.map(criterion => <div className="sb-criterion" key={criterion.id}><span>{criterion.kind === 'human' ? t('你体验确认', 'Your experience') : t('AI 取证检查', 'AI evidence check')}</span><p>{criterion.text}</p></div>)}
       <details><summary>{t('执行说明', 'Execution instructions')}</summary><p className="sb-preserve">{task.description}</p></details>

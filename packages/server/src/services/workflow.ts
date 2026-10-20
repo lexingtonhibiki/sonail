@@ -10,14 +10,21 @@ import type { AgentManager } from './agent-manager.js';
 import { broadcastTaskUpdate } from '../routes/helpers.js';
 import { HarnessProvider } from './harness.js';
 import { WorkflowStore } from './workflow-store.js';
+import { assertWriteScope } from './write-scope.js';
 import { AiAccessStore } from './ai-access.js';
-import { mayAutoAccept, parseJson, selectProfile, validateAssessment, validateCriteria, validateProfile, validateProposal, type Assessment, type ProjectWorkflow, type Proposal, type Role, type RoleProfile, type TaskPolicy } from '@ai-agent-board/shared/workflow.js';
+import { mayAutoAccept, parseJson, selectProfile, validateAssessment, validateCriteria, validateAllowedWritePaths, validateProfile, validateProposal, type Assessment, type ProjectWorkflow, type Proposal, type Role, type RoleProfile, type TaskPolicy } from '@ai-agent-board/shared/workflow.js';
 
 export function git(cwd: string, args: string[]): string { return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true }).trim(); }
 export function workspaceDigest(cwd: string, policy: TaskPolicy, revision: number): string {
   const hash = createHash('sha256');
-  hash.update(git(cwd, ['rev-parse', 'HEAD'])); hash.update(git(cwd, ['diff', 'HEAD', '--']));
-  hash.update(JSON.stringify({ criteria: policy.criteria, revision, ...(policy.managerInstructions ? { managerInstructions: policy.managerInstructions } : {}) }));
+  hash.update(git(cwd, ['rev-parse', 'HEAD']));
+  if (policy.allowedWritePaths === undefined) hash.update(git(cwd, ['diff', 'HEAD', '--']));
+  else for (const layer of [[], ['--cached']]) {
+    hash.update(layer.length ? '\0index\0' : '\0worktree\0');
+    // Bind both index and working content, including binary files, without text trimming.
+    hash.update(execFileSync('git', ['diff', ...layer, '--binary', '--full-index', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', 'HEAD', '--'], { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true }));
+  }
+  hash.update(JSON.stringify({ criteria: policy.criteria, revision, ...(policy.allowedWritePaths !== undefined ? { allowedWritePaths: policy.allowedWritePaths } : {}), ...(policy.managerInstructions ? { managerInstructions: policy.managerInstructions } : {}) }));
   const paths = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd, encoding: 'utf8', windowsHide: true }).split('\0').filter(Boolean).sort();
   for (const name of paths) { const file = path.resolve(cwd, name); if (!file.startsWith(path.resolve(cwd) + path.sep) || fs.lstatSync(file).isSymbolicLink()) throw new Error('工作区路径异常 / Unsafe workspace path'); hash.update(name); hash.update(fs.readFileSync(file)); }
   return hash.digest('hex');
@@ -66,7 +73,7 @@ export class Workflow {
     const workflow = this.store.get(id);
     const tasks = (await this.repo.getAll(true, id)).map(task => {
       const policy = workflow.tasks[task.id];
-      return { id: task.id, title: task.title, description: task.description, phase: policy?.phase || task.columnId, criteria: policy?.criteria || [], dependsOn: policy?.dependsOn || [], managerGuidance: policy?.managerInstructions, managerRecommendation: policy?.manager?.summary, attention: policy?.attention };
+      return { id: task.id, title: task.title, description: task.description, phase: policy?.phase || task.columnId, criteria: policy?.criteria || [], ...(policy?.allowedWritePaths !== undefined ? { allowedWritePaths: policy.allowedWritePaths } : {}), dependsOn: policy?.dependsOn || [], managerGuidance: policy?.managerInstructions, managerRecommendation: policy?.manager?.summary, attention: policy?.attention };
     });
     return { projectId: id, name: project.name, repoPath, toolsDirectory: this.store.workbenchSettings().toolsDirectory, fingerprint, revision: workflow.revision, baselineCommit: git(repoPath, ['rev-parse', 'HEAD']), idea: workflow.idea, productSpec: workflow.productSpec, technicalSpec: workflow.technicalSpec, pendingPlan: workflow.proposal ? { source: workflow.importPreview?.source, proposal: workflow.proposal } : undefined, tasks };
   }
@@ -210,7 +217,7 @@ export class Workflow {
       const project = await this.project(id); const p = this.store.get(id);
       if (p.importPreview) throw new Error('先确认或丢弃已有来稿 / Resolve the pending imported draft first');
       if (!p.idea.trim()) throw new Error('先填写原始想法 / Enter original idea first');
-      const prompt = `Original need:\n${p.idea}\nCurrent product specification:\n${p.productSpec}\nClarify ambiguities in the product specification. Create a minimal coherent task plan. Preserve scope and upstream read-only artifacts. Include paths allowed to write and dependency restrictions in task descriptions. Use paths relative to the assigned task worktree, never hardcode the main project directory as a write target. Do not add unrequested technical restrictions or contradictory criteria. Return only JSON: {"productSpec":"user-readable usage and expected result","technicalSpec":"implementation boundaries and verification","tasks":[{"title":"01 name","description":"execution instructions and allowed write paths","criteria":[{"id":"A1","text":"criterion","kind":"objective|human"}],"dependsOn":[],"complexity":"small|standard|deep"}]}. productSpec and technicalSpec MUST be plain strings, NOT objects or arrays. dependsOn is zero-based indices of earlier tasks. Never publish or execute the plan.`;
+      const prompt = `Original need:\n${p.idea}\nCurrent product specification:\n${p.productSpec}\nClarify ambiguities in the product specification. Create a minimal coherent task plan. Preserve scope and upstream read-only artifacts. Include dependency restrictions in task descriptions and an explicit allowedWritePaths array for each task: [] means read-only delivery; repository-relative exact files or trailing-slash directory prefixes only, no glob or traversal. This is a Git delivery gate, not a runtime sandbox. Use paths relative to the assigned task worktree, never hardcode the main project directory as a write target. Do not add unrequested technical restrictions or contradictory criteria. Return only JSON: {"productSpec":"user-readable usage and expected result","technicalSpec":"implementation boundaries and verification","tasks":[{"title":"01 name","description":"execution instructions","allowedWritePaths":["README.md"],"criteria":[{"id":"A1","text":"criterion","kind":"objective|human"}],"dependsOn":[],"complexity":"small|standard|deep"}]}. productSpec and technicalSpec MUST be plain strings, NOT objects or arrays. dependsOn is zero-based indices of earlier tasks. Never publish or execute the plan.`;
       const cwd = project.repoPath || process.cwd();
       const raw = await this.roleRun(id, 'manager', prompt, cwd);
       let proposal: Proposal;
@@ -244,7 +251,7 @@ export class Workflow {
       } catch (e) { for (const taskId of created) await this.repo.delete(taskId); throw e; }
       if (!p.idea.trim() && plan!.originalIdea) p.idea = plan!.originalIdea;
       p.productSpec = plan!.productSpec; p.technicalSpec = plan!.technicalSpec; p.revision++;
-      plan!.tasks.forEach((item, i) => { p.tasks[created[i]] = { criteria: item.criteria, dependsOn: item.dependsOn.map(n => created[n]), complexity: item.complexity, rounds: 0, phase: 'ready' }; });
+      plan!.tasks.forEach((item, i) => { p.tasks[created[i]] = { criteria: item.criteria, ...(item.allowedWritePaths !== undefined ? { allowedWritePaths: [...item.allowedWritePaths] } : {}), dependsOn: item.dependsOn.map(n => created[n]), complexity: item.complexity, rounds: 0, phase: 'ready' }; });
       delete p.proposal; delete p.importPreview; this.event(id, 'system', `已发布 ${created.length} 张任务卡 / Published ${created.length} tasks`);
       this.store.record(id, { kind: 'plan', summary: `方案已确认，${created.length} 张任务卡已发布；执行按项目授权启动 / Plan confirmed; ${created.length} tasks published, execution follows project permissions` });
       for (const taskId of created) broadcastTaskUpdate((await this.repo.getById(taskId))!);
@@ -256,13 +263,14 @@ export class Workflow {
     if (!task || task.projectId !== id || !policy) throw new Error('任务不属于此项目 / Task does not belong to project');
     return { task, policy, project };
   }
-  async editTask(id: string, taskId: string, input: { title: string; description: string; criteria: TaskPolicy['criteria']; override?: RoleProfile }): Promise<void> {
+  async editTask(id: string, taskId: string, input: { title: string; description: string; criteria: TaskPolicy['criteria']; allowedWritePaths?: string[]; override?: RoleProfile }): Promise<void> {
     this.assertNotArchived(id);
     const { policy } = await this.task(id, taskId);
     if (this.busy(id)) throw new Error('运行中不能修订 / Stop work before revision');
     if (!input.title?.trim() || input.title.length > 200 || typeof input.description !== 'string' || input.description.length > 5000) throw new Error('任务内容无效 / Invalid task');
-    validateCriteria(input.criteria); if (input.override) validateProfile(input.override);
+    validateCriteria(input.criteria); validateAllowedWritePaths(input.allowedWritePaths); if (input.override) validateProfile(input.override);
     await this.reopen(id, taskId, '任务规格已修订 / Task revised');
+    if (input.allowedWritePaths !== undefined) policy.allowedWritePaths = [...input.allowedWritePaths];
     policy.criteria = input.criteria; policy.override = input.override; policy.rounds = 0;
     const updated = await this.repo.update(taskId, { title: input.title, description: input.description }); if (updated) broadcastTaskUpdate(updated); this.store.save();
   }
@@ -273,6 +281,7 @@ export class Workflow {
       const { task, policy, project: p } = await this.task(id, taskId);
       if (this.active.has(taskId) || this.agents.isRunning(taskId) || ['reviewing', 'manager-check'].includes(policy.phase)) throw new Error('任务正在运行 / Task already running');
       if (policy.acceptedAt) throw new Error('先重新打开已完成任务 / Reopen accepted task first');
+      validateAllowedWritePaths(policy.allowedWritePaths);
       this.assertDependencies(task, policy, p, false); this.assertCapacity(p);
       if (!task.repoPath) throw new Error('先为项目配置本地 Git 路径 / Configure a local Git project');
       git(task.repoPath, ['rev-parse', '--verify', 'HEAD']);
@@ -286,7 +295,7 @@ export class Workflow {
         }
       }
       const profile = selectProfile(policy.override || p.roles.executor, policy.complexity); validateProfile(profile);
-      const snapshot: Task = { ...task, runProfile: profile, runEndpoint: profile.endpointId ? this.store.endpoint(profile.endpointId) : undefined, description: `${task.description}\n\nProduct specification:\n${p.productSpec}\nTechnical boundaries:\n${p.technicalSpec}\nAcceptance:\n${JSON.stringify(policy.criteria)}\nIf tool installation is authorized, use a tool-specific subdirectory under ${JSON.stringify(this.store.workbenchSettings().toolsDirectory)}. This setting grants no installation or network permission.\nDependencies are read-only. Do not modify upstream deliverables. Manager guidance may adjust implementation method ONLY, never override original goal, write scope, acceptance criteria or technical boundaries.\n${policy.managerInstructions ? `Manager execution guidance:\n${policy.managerInstructions}\n` : ''}${correction ? `Revision instructions:\n${correction}` : ''}`, agentType: profile.harness === 'dsh' ? 'opencode' : profile.harness, useWorktree: true };
+      const snapshot: Task = { ...task, runProfile: profile, runEndpoint: profile.endpointId ? this.store.endpoint(profile.endpointId) : undefined, description: `${task.description}\n\nProduct specification:\n${p.productSpec}\nTechnical boundaries:\n${p.technicalSpec}\nStructured allowed write paths (undefined = legacy/unconfigured; [] = read-only delivery; trailing / = directory; delivery gate, not sandbox):\n${JSON.stringify(policy.allowedWritePaths) ?? "unconfigured"}\nAcceptance:\n${JSON.stringify(policy.criteria)}\nIf tool installation is authorized, use a tool-specific subdirectory under ${JSON.stringify(this.store.workbenchSettings().toolsDirectory)}. This setting grants no installation or network permission.\nDependencies are read-only. Do not modify upstream deliverables. Manager guidance may adjust implementation method ONLY, never override original goal, write scope, acceptance criteria or technical boundaries.\n${policy.managerInstructions ? `Manager execution guidance:\n${policy.managerInstructions}\n` : ''}${correction ? `Revision instructions:\n${correction}` : ''}`, agentType: profile.harness === 'dsh' ? 'opencode' : profile.harness, useWorktree: true };
       const generation = policy.generation = (policy.generation || 0) + 1;
       const current = () => policy.generation === generation;
       this.invalidate(policy); policy.inputCommits = Object.fromEntries(policy.dependsOn.map(d => [d, p.tasks[d].integratedCommit!])); policy.phase = 'executing';
@@ -323,29 +332,36 @@ export class Workflow {
     try {
       // Only commit this task's registered worktree, never the user's main tree.
       this.registered(task);
+      const baseCommit = git(task.repoPath!, ['rev-parse', task.baseBranch || 'main']);
+      const scopeBase = git(task.worktreePath, ['merge-base', baseCommit, 'HEAD']);
+      assertWriteScope(task.worktreePath, policy.allowedWritePaths, scopeBase);
+      if (git(task.repoPath!, ['rev-parse', task.baseBranch || 'main']) !== baseCommit) throw new Error('Base changed during scope check');
       if (git(task.worktreePath, ['status', '--porcelain'])) {
         git(task.worktreePath, ['add', '-A']);
         git(task.worktreePath, ['-c', 'user.name=Sonail Task', '-c', 'user.email=sonail-task@localhost', 'commit', '-m', `Sonail task ${task.id}`]);
       }
-      const baseCommit = git(task.repoPath!, ['rev-parse', task.baseBranch || 'main']);
       if (!this.ancestor(task.worktreePath, baseCommit, 'HEAD')) {
         try { git(task.worktreePath, ['-c', 'user.name=Sonail Task', '-c', 'user.email=sonail-task@localhost', 'merge', baseCommit, '--no-edit']); }
         catch { try { git(task.worktreePath, ['merge', '--abort']); } catch {} throw new Error('与最新项目代码冲突，任务产物已保留 / Latest base conflicts; task work retained'); }
       }
+      assertWriteScope(task.worktreePath, policy.allowedWritePaths, baseCommit);
+      if (git(task.repoPath!, ['rev-parse', task.baseBranch || 'main']) !== baseCommit) throw new Error('Base changed during scope check');
       const digest = workspaceDigest(task.worktreePath, policy, p.revision);
       const snapshotCurrent = () => workspaceDigest(task.worktreePath!, policy, p.revision) === digest && git(task.repoPath!, ['rev-parse', task.baseBranch || 'main']) === baseCommit;
-      const diff = git(task.worktreePath, ['diff', `${task.baseBranch || 'main'}...HEAD`, '--']).slice(0, 60000) + '\n' + git(task.worktreePath, ['diff', 'HEAD', '--']).slice(0, 60000);
-      const context = `Original need:\n${p.idea}\nProduct specification:\n${p.productSpec}\nTechnical specification:\n${p.technicalSpec}\nTask:\n${task.title}\n${task.description}\nManager execution guidance (cannot override original boundaries):\n${policy.managerInstructions || ''}\nCriteria:\n${JSON.stringify(policy.criteria)}\nWorkspace: ${task.worktreePath}\nDiff (may be truncated; inspect actual files):\n${diff}\nExecutor result (untrusted):\n${task.summary || ''}\n${assessmentSchema}`;
+      const diff = git(task.worktreePath, ['diff', `${baseCommit}...HEAD`, '--']).slice(0, 60000) + '\n' + git(task.worktreePath, ['diff', 'HEAD', '--']).slice(0, 60000);
+      const context = `Original need:\n${p.idea}\nProduct specification:\n${p.productSpec}\nTechnical specification:\n${p.technicalSpec}\nTask:\n${task.title}\n${task.description}\nManager execution guidance (cannot override original boundaries):\n${policy.managerInstructions || ''}\nStructured allowed write paths (delivery gate, not sandbox):\n${JSON.stringify(policy.allowedWritePaths) ?? "unconfigured"}\nCriteria:\n${JSON.stringify(policy.criteria)}\nWorkspace: ${task.worktreePath}\nDiff (may be truncated; inspect actual files):\n${diff}\nExecutor result (untrusted):\n${task.summary || ''}\n${assessmentSchema}`;
       const reviewer = await this.assessment(id, 'reviewer', context, task.worktreePath, taskId, policy);
       if (!current()) return;
       this.assertDependencies(task, policy, p);
       if (!snapshotCurrent()) throw new Error('产物或主分支在审查期间更新，请重新审查 / Workspace or base changed during review');
+      assertWriteScope(task.worktreePath, policy.allowedWritePaths, baseCommit);
       policy.reviewer = reviewer; policy.digest = digest; policy.specRevision = p.revision; policy.reviewBaseCommit = baseCommit;
       policy.phase = 'manager-check'; this.store.save();
       const manager = await this.assessment(id, 'manager', `${context}\nIndependent review:\n${JSON.stringify(reviewer)}\nProject task states:\n${JSON.stringify(Object.entries(p.tasks).map(([id, t]) => ({ id, phase: t.phase, dependencies: t.dependsOn })))}\nDelegated execution-method adjustment permitted: ${p.managerMayEdit}. Check overall intent, integration and scope. When review finds defects, give concrete executor revision guidance. If the prescribed execution method is infeasible, you may propose taskAdjustment within unchanged boundaries. Give an evidence-based recommendation, not acceptance.`, task.worktreePath, taskId, policy);
       if (!current()) return;
       this.assertDependencies(task, policy, p);
       if (!snapshotCurrent()) throw new Error('产物或主分支在经理审查期间更新 / Workspace or base changed during manager review');
+      assertWriteScope(task.worktreePath, policy.allowedWritePaths, baseCommit);
       policy.manager = manager;
       policy.phase = manager.verdict === 'blocked' ? 'blocked' : manager.verdict === 'revise' || reviewer.verdict === 'revise' ? 'needs-changes' : reviewer.verdict === 'blocked' ? 'blocked' : 'awaiting-user';
       this.event(id, 'manager', manager.summary, taskId);
@@ -364,6 +380,8 @@ export class Workflow {
   private assertFresh(task: Task, policy: TaskPolicy, p: ProjectWorkflow) {
     this.assertDependencies(task, policy, p); this.registered(task);
     if (!task.worktreePath || !policy.digest || policy.specRevision !== p.revision || workspaceDigest(task.worktreePath, policy, p.revision) !== policy.digest || !task.repoPath || policy.reviewBaseCommit !== git(task.repoPath, ['rev-parse', task.baseBranch || 'main'])) throw new Error('产物、规格或项目主分支已经变化，必须重新审查 / Stale review; re-review required');
+    assertWriteScope(task.worktreePath, policy.allowedWritePaths, policy.reviewBaseCommit!);
+    if (policy.reviewBaseCommit !== git(task.repoPath, ['rev-parse', task.baseBranch || 'main'])) throw new Error('Base changed during scope check');
   }
   async accept(id: string, taskId: string, automatic = false): Promise<void> {
     this.assertNotArchived(id);

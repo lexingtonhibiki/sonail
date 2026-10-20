@@ -11,6 +11,7 @@ function run(name, command, args) {
 }
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+run('Run client write-scope contracts', process.execPath, ['--import', 'tsx/esm', '--test', 'packages/client/tests/write-scope.test.mjs']);
 run('Run server contract tests', npm, ['test', '-w', '@ai-agent-board/server']);
 
 const pythonCandidates = process.platform === 'win32'
