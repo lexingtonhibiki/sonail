@@ -4,6 +4,8 @@ import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentProvider, AgentSession, AgentSessionConfig } from '@codewithdan/agent-sdk-core';
+import { usageReport } from './usage.js';
+import type { UsageEvidence, UsageReport } from '../../../../shared/usage.js';
 import type { Codex } from '@openai/codex-sdk';
 import { type RoleProfile, type Endpoint, type Role } from '../../../../shared/workflow.js';
 
@@ -37,6 +39,9 @@ export class HarnessProvider implements AgentProvider {
     let cleanup: (() => Promise<void> | void) | undefined;
     const emit = (type: 'output' | 'tool_call' | 'command_output' | 'error', content: string, metadata?: Record<string, unknown>) => config.onEvent({ id: randomUUID(), contextId: config.contextId, type, content, timestamp: Date.now(), metadata });
     const execute = async (userPrompt: string) => {
+      const attemptId = randomUUID();
+      const reports: UsageReport[] = [];
+      let outcome: UsageEvidence['outcome'] = 'failed';
       const timer = setTimeout(() => controller.abort(), this.profile.timeoutMinutes * 60000);
       const prompt = `${config.systemPrompt}\n\n${this.role === 'executor' ? 'Only modify the assigned workspace. Do not merge or change acceptance criteria.' : 'Read-only independent analysis. Never modify files, launch other agents, change criteria or merge code.'}\n\n${userPrompt}`;
       try {
@@ -64,6 +69,7 @@ export class HarnessProvider implements AgentProvider {
           })().catch(() => {});
           void pump;
           const result = await owned.client.session.prompt(request, { throwOnError: true, signal: controller.signal });
+          if (result.data?.info) reports.push(usageReport('opencode.session.prompt.info', result.data.info));
           if (result.data?.info.error) throw new Error('OpenCode 执行失败 / OpenCode run failed');
           const text = result.data?.parts.filter(p => p.type === 'text').map(p => 'text' in p ? p.text : '').join('\n') || '';
           if (!text.trim()) throw new Error('模型未返回最终结果 / No final model result');
@@ -74,7 +80,7 @@ export class HarnessProvider implements AgentProvider {
           let completed = false;
           let lastError = '';
           for await (const event of events) {
-            if (event.type === 'turn.completed') completed = true;
+            if (event.type === 'turn.completed') { completed = true; reports.push(usageReport('codex.turn.completed', event)); }
             if (event.type === 'thread.started') { sessionId = event.thread_id; emit('tool_call', `Codex thread ${sessionId}`, { sessionId }); }
             if (event.type === 'turn.failed') throw new Error(`Codex: ${event.error.message}`);
             // CLI error events include retry notices. turn.failed or an absent
@@ -96,20 +102,27 @@ export class HarnessProvider implements AgentProvider {
           for await (const m of stream) {
             if (m.type === 'system' && m.subtype === 'init') { sessionId = m.session_id; emit('tool_call', `Claude session ${sessionId}`, { sessionId }); }
             if (m.type === 'assistant') for (const b of m.message.content) { if (b.type === 'text') emit('output', b.text); else if (b.type === 'tool_use') emit('tool_call', b.name); }
-            if (m.type === 'result') { if (m.subtype !== 'success') throw new Error('Claude 执行未完成 / Claude run incomplete'); completed = true; }
+            if (m.type === 'result') { reports.push(usageReport('claude.result', m)); if (m.subtype !== 'success') throw new Error('Claude 执行未完成 / Claude run incomplete'); completed = true; }
           }
           if (!completed) throw new Error('Claude 没有完成终态 / Claude terminal state missing');
         } else {
           await this.runDsh(config.workingDirectory, prompt, controller.signal, emit, id => { sessionId = id; });
         }
         if (controller.signal.aborted) throw new Error('已停止或超时 / Stopped or timed out');
+        outcome = 'complete';
         return { status: 'complete' as const };
       } catch (error) {
         const detail = (error instanceof Error ? error.message : 'Unknown harness error').slice(0, 1600);
         const safeDetail = this.endpoint?.apiKey ? detail.split(this.endpoint.apiKey).join('[REDACTED]') : detail;
         emit('error', `运行失败、被停止或能力不支持；未自动换模型 / Model unchanged: ${safeDetail}`);
         return { status: 'failed' as const, error: `运行未完成 / Run incomplete: ${safeDetail}` };
-      } finally { clearTimeout(timer); controller.abort(); await cleanup?.(); }
+      } finally {
+        // One event per execute, including failures after reported usage. No
+        // aggregation: reports can be cumulative snapshots or only a last message.
+        const usage: UsageEvidence = { version: 1, attemptId, role: this.role, harness: this.profile.harness, selectedModel: this.model, effort: this.profile.effort, outcome, reports };
+        try { emit('tool_call', '用量证据（非完整账单） / Usage evidence (not a complete bill)', { sonailUsage: usage }); }
+        finally { clearTimeout(timer); controller.abort(); await cleanup?.(); }
+      }
     };
     return { execute, get sessionId() { return sessionId; }, async send() { throw new Error('请使用项目经理操作或原生会话 / Use project actions or native session'); }, async abort() { controller.abort(); await cleanup?.(); }, async destroy() { controller.abort(); await cleanup?.(); } };
   }

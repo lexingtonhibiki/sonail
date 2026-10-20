@@ -44,8 +44,14 @@ export class WorkflowStore {
   }
   event(id: string, data: Omit<WorkflowEvent, 'id' | 'at'>): void {
     const p = this.get(id);
-    p.events.push({ ...data, content: this.redact(data.content).slice(-16000), id: randomUUID(), at: Date.now() });
+    p.events.push({ ...data, ...(data.usage ? { usage: { ...data.usage, selectedModel: this.redact(data.usage.selectedModel), effort: this.redact(data.usage.effort) } } : {}), content: this.redact(data.content).slice(-16000), id: randomUUID(), at: Date.now() });
     p.events = p.events.slice(-250); this.save();
+  }
+  recordUsage(id: string, taskId: string, usage: import('../../../../shared/usage.js').UsageEvidence): void {
+    // Evidence must never create a project, nor count a repeated callback twice.
+    const p = this.projects[id];
+    if (!p || p.events.some(event => event.usage?.attemptId === usage.attemptId)) return;
+    this.event(id, { role: usage.role, taskId, type: 'usage', content: '用量证据（非完整账单） / Usage evidence (not a complete bill)', usage });
   }
   listEndpoints(): Endpoint[] { return this.endpoints.map(({ apiKey, ...e }) => ({ ...e, hasKey: !!apiKey })); }
   workbenchSettings(): WorkbenchSettings { return { toolsDirectory: defaultToolsDirectory(), ...this.settings }; }

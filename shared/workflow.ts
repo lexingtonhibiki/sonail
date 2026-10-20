@@ -1,3 +1,4 @@
+import type { UsageEvidence } from './usage.js';
 export type Role = 'manager' | 'executor' | 'reviewer';
 export type Harness = 'opencode' | 'codex' | 'claude' | 'dsh';
 export interface ModelChoice { model: string; effort: string; endpointId?: string; }
@@ -32,7 +33,7 @@ export interface TaskPolicy {
   managerInstructions?: string; attention?: { message: string; nextStep: string };
 }
 export interface WorkflowEvent {
-  id: string; at: number; role: Role | 'system'; taskId?: string; type: string; content: string;
+  id: string; at: number; role: Role | 'system'; taskId?: string; type: string; content: string; usage?: UsageEvidence;
 }
 export interface ProjectWorkflow {
   idea: string; productSpec: string; technicalSpec: string; revision: number;

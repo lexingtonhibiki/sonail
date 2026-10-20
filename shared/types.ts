@@ -182,6 +182,7 @@ export interface AgentEvent {
   content: string;
   timestamp: number;
   metadata?: {
+    sonailUsage?: import('./usage.js').UsageEvidence;
     file?: string;
     fileEventType?: string;
     language?: string;

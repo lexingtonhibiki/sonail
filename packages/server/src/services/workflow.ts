@@ -8,6 +8,7 @@ import type { TaskRepository } from '../repositories/types.js';
 import type { ProjectRepository } from '../repositories/project-types.js';
 import type { AgentManager } from './agent-manager.js';
 import { broadcastTaskUpdate } from '../routes/helpers.js';
+import { getUsageEvidence } from './usage.js';
 import { HarnessProvider } from './harness.js';
 import { WorkflowStore } from './workflow-store.js';
 import { AiAccessStore } from './ai-access.js';
@@ -32,6 +33,9 @@ export class Workflow {
   constructor(readonly store: WorkflowStore, private repo: TaskRepository, private projects: ProjectRepository, private agents: AgentManager, private providerFactory = (p: RoleProfile, role: Role) => new HarnessProvider(p, role, p.endpointId ? store.endpoint(p.endpointId) : undefined)) {
     this.aiAccess = new AiAccessStore(path.join(path.dirname(store.file), 'sonail-ai-access.json'));
     agents.setRedactor(text => store.redact(text));
+    agents.setUsageRecorder(async (projectId, taskId, usage, mayRecord) => {
+      if (await this.projects.getById(projectId) && mayRecord()) store.recordUsage(projectId, taskId, usage);
+    });
   }
   private invalidate(t: TaskPolicy) {
     delete t.acceptedAt; delete t.mergedAt; delete t.integratedCommit;
@@ -172,7 +176,8 @@ export class Workflow {
     let text = '';
     try {
       await provider.start(); if (cancelled) throw new Error('运行已取消 / Run cancelled');
-      session = await provider.createSession({ contextId: runId, workingDirectory: cwd, systemPrompt: `You are the ${role} of one project. Respond in clear Chinese unless the original need requests otherwise. If tool installation is authorized, use a tool-specific subdirectory under ${JSON.stringify(this.store.workbenchSettings().toolsDirectory)}. This setting grants no installation or network permission.`, onEvent: e => { if (cancelled) return; this.event(id, role, e.content, taskId, e.type); if (e.type === 'output') text += e.content; } });
+      session = await provider.createSession({ contextId: runId, workingDirectory: cwd, systemPrompt: `You are the ${role} of one project. Respond in clear Chinese unless the original need requests otherwise. If tool installation is authorized, use a tool-specific subdirectory under ${JSON.stringify(this.store.workbenchSettings().toolsDirectory)}. This setting grants no installation or network permission.`, onEvent: e => { const usage = getUsageEvidence(e.metadata); if (usage) this.store.event(id, { role, content: e.content, taskId, type: 'usage', usage });
+        if (cancelled || usage) return; this.event(id, role, e.content, taskId, e.type); if (e.type === 'output') text += e.content; } });
       if (cancelled) throw new Error('运行已取消 / Run cancelled');
       const result = await session.execute(prompt);
       if (cancelled) throw new Error('运行已取消 / Run cancelled');
