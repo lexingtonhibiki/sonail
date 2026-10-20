@@ -167,8 +167,9 @@ export function createAttachmentsRouter(
       return;
     }
     const filePath = path.join(UPLOADS_DIR, attachment.taskId, attachment.filename);
-    fs.unlink(filePath, () => {}); // ignore missing
+    // Preserve the image if metadata deletion fails (for example, a database lock).
     await store.deleteById(attachment.id);
+    fs.unlink(filePath, () => {}); // best-effort cleanup after metadata is committed
     res.status(204).end();
   }));
 
