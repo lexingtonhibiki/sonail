@@ -45,16 +45,23 @@ export function defaults(): ProjectWorkflow {
   const profile = (): RoleProfile => ({ harness: 'opencode', model: 'opencode/space-bunny-free', effort: 'default', auto: false, candidates: [], timeoutMinutes: 30 });
   return { idea: '', productSpec: '', technicalSpec: '', revision: 1, roles: { manager: profile(), executor: profile(), reviewer: profile() }, autonomous: false, autoAccept: false, autoMerge: false, fullManaged: false, managerMayEdit: false, managerRecords: [], maxConcurrency: 2, maxRevisions: 2, paused: false, tasks: {}, events: [] };
 }
-export function selectProfile(profile: RoleProfile, complexity: TaskPolicy['complexity'] = 'standard'): RoleProfile {
+export function selectProfile(profile: RoleProfile, complexity: TaskPolicy['complexity'] = 'standard', role: Role = 'executor'): RoleProfile {
+  validateProfile(profile);
   if (!profile.auto || !profile.candidates.length) return { ...profile };
-  const index = complexity === 'small' ? 0 : complexity === 'deep' ? profile.candidates.length - 1 : Math.floor((profile.candidates.length - 1) / 2);
+  // Candidate order is user-defined capability, not an inferred price ranking.
+  // Oversight must not inherit the lightweight tier of a narrowly scoped worker.
+  const tier = role === 'executor' ? complexity : 'deep';
+  const index = tier === 'small' ? 0 : tier === 'deep' ? profile.candidates.length - 1 : Math.floor((profile.candidates.length - 1) / 2);
   return { ...profile, ...profile.candidates[index] };
 }
 export function validateProfile(p: RoleProfile): void {
   if (!p || !['opencode', 'codex', 'claude', 'dsh'].includes(p.harness) || typeof p.model !== 'string' || !p.model.trim() || p.model.length > 200) throw new Error('请选择 harness 和模型 / Select harness and model');
   if (!['default', 'low', 'medium', 'high', 'xhigh', 'max'].includes(p.effort)) throw new Error('无效思考等级 / Invalid effort');
   if (typeof p.auto !== 'boolean' || !Array.isArray(p.candidates) || p.candidates.length > 12 || !Number.isInteger(p.timeoutMinutes) || p.timeoutMinutes < 1 || p.timeoutMinutes > 180) throw new Error('无效自动选档或超时 / Invalid selection or timeout');
-  for (const c of p.candidates) validateProfile({ ...p, ...c, auto: false, candidates: [] });
+  for (const c of p.candidates) {
+    if (!c || typeof c !== 'object' || Array.isArray(c) || typeof c.model !== 'string' || !c.model.trim() || typeof c.effort !== 'string') throw new Error('候选模型必须明确指定模型及思考等级 / Candidate requires explicit model and effort');
+    validateProfile({ ...p, ...c, auto: false, candidates: [] });
+  }
   if (p.endpointId && p.harness !== 'opencode') throw new Error('自定义接口通过 OpenCode 执行 / Custom endpoints require OpenCode');
 }
 export function parseJson<T>(text: string): T {
