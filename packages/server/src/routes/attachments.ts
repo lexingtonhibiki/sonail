@@ -103,30 +103,25 @@ export function createAttachmentsRouter(
       return;
     }
 
-    const attachments: TaskAttachment[] = [];
+    const attachments: TaskAttachment[] = files.map(file => ({
+      id: uuid(),
+      taskId,
+      filename: file.filename,
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
+      createdAt: Date.now(),
+    }));
 
     try {
-      for (const file of files) {
-        const attachment: TaskAttachment = {
-          id: uuid(),
-          taskId,
-          filename: file.filename,
-          originalName: file.originalname,
-          mimeType: file.mimetype,
-          size: file.size,
-          createdAt: Date.now(),
-        };
-        await store.insert(attachment);
-        attachments.push(attachment);
-      }
-      res.status(201).json(attachments);
+      await store.insertMany(attachments);
     } catch (err) {
-      // Clean up uploaded files on DB error
-      for (const file of files) {
-        fs.unlink(file.path, () => {});
-      }
+      // Atomic metadata insertion leaves no rows pointing at these failed uploads.
+      await Promise.all(files.map(file => fs.promises.unlink(file.path).catch(() => {})));
       res.status(500).json({ error: 'Failed to save attachment metadata' });
+      return;
     }
+    res.status(201).json(attachments);
   }));
 
   // GET /tasks/:id/attachments — list attachments

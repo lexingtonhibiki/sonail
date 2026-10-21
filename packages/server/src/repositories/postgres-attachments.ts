@@ -35,6 +35,22 @@ export class PostgresAttachmentStore implements AttachmentStore {
     );
   }
 
+  async insertMany(attachments: TaskAttachment[]): Promise<void> {
+    if (attachments.length === 0) return;
+    const values = attachments.flatMap(a => [
+      a.id, a.taskId, a.filename, a.originalName, a.mimeType, a.size, a.createdAt,
+    ]);
+    const rows = attachments.map((_, index) =>
+      `(${Array.from({ length: 7 }, (_unused, column) => `$${index * 7 + column + 1}`).join(', ')})`
+    );
+    // A single statement is atomic even when a later row violates a constraint.
+    await this.pool.query(
+      `INSERT INTO task_attachments (id, task_id, filename, original_name, mime_type, size, created_at)
+       VALUES ${rows.join(', ')}`,
+      values,
+    );
+  }
+
   async getByTaskId(taskId: string): Promise<TaskAttachment[]> {
     const { rows } = await this.pool.query(
       `SELECT * FROM task_attachments WHERE task_id = $1 ORDER BY created_at ASC`,
