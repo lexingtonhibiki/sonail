@@ -33,7 +33,7 @@ export class SqliteAttachmentStore implements AttachmentStore {
     countByTaskId: Database.Statement;
   };
 
-  constructor(db: Database.Database) {
+  constructor(private db: Database.Database) {
     this.stmts = {
       insert: db.prepare(`
         INSERT INTO task_attachments (id, task_id, filename, original_name, mime_type, size, created_at)
@@ -50,6 +50,14 @@ export class SqliteAttachmentStore implements AttachmentStore {
 
   async insert(a: TaskAttachment): Promise<void> {
     this.stmts.insert.run(a.id, a.taskId, a.filename, a.originalName, a.mimeType, a.size, a.createdAt);
+  }
+
+  async insertMany(attachments: TaskAttachment[]): Promise<void> {
+    this.db.transaction((batch: TaskAttachment[]) => {
+      for (const a of batch) {
+        this.stmts.insert.run(a.id, a.taskId, a.filename, a.originalName, a.mimeType, a.size, a.createdAt);
+      }
+    })(attachments);
   }
 
   async getByTaskId(taskId: string): Promise<TaskAttachment[]> {
