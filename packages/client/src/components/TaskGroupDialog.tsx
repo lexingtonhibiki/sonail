@@ -144,7 +144,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
       if (isEditMode && onEditSubmit && editGroup) {
         const result = await onEditSubmit(editGroup.id, {
           title: title.trim(),
-          description: description.trim() || undefined,
+          description: description.trim(),
           priority,
           maxConcurrency,
         });
