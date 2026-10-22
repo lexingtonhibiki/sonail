@@ -431,6 +431,55 @@ test.describe('Task Groups UI', () => {
     createdGroupIds.length = 0;
   });
 
+  test('edit mode hides creation-only controls and preserves task setup', async ({ page, request }) => {
+    const created = await request.post(`${API}/api/groups`, {
+      data: {
+        title: 'Edit controls group', description: 'Keep description',
+        baseBranch: 'feature-base', maxConcurrency: 1, children: makeChildren(2),
+      },
+    });
+    expect(created.status()).toBe(201);
+    const group = await created.json();
+    createdGroupIds.push(group.id);
+    await page.goto('/projects/default');
+    await page.getByTitle('Edit group', { exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Edit Task Group' })).toBeVisible();
+    await expect(page.locator('#group-repo-path')).toHaveCount(0);
+    await expect(page.getByPlaceholder('main', { exact: true })).toHaveCount(0);
+    await expect(page.getByPlaceholder('Task title', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Add Task' })).toHaveCount(0);
+    await expect(page.getByText('Auto-run — start agents immediately after creating')).toHaveCount(0);
+    await page.getByPlaceholder('e.g., Q2 Feature Sprint').fill('Cancelled title');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByTitle('Edit group', { exact: true }).click();
+    await expect(page.getByPlaceholder('e.g., Q2 Feature Sprint')).toHaveValue(group.title);
+    await page.getByPlaceholder('e.g., Q2 Feature Sprint').fill('Saved title');
+    const patch = page.waitForRequest((req) =>
+      req.url().endsWith(`/api/groups/${group.id}`) && req.method() === 'PATCH');
+    const saved = page.waitForResponse((res) =>
+      res.url().endsWith(`/api/groups/${group.id}`) && res.request().method() === 'PATCH');
+    await page.getByRole('button', { name: 'Save Changes' }).click();
+    expect((await patch).postDataJSON()).toEqual({
+      title: 'Saved title', description: 'Keep description', priority: 'medium', maxConcurrency: 1,
+    });
+    expect((await saved).ok()).toBeTruthy();
+    await expect(page.getByRole('heading', { name: 'Edit Task Group' })).not.toBeVisible();
+    const persisted = await (await request.get(`${API}/api/groups/${group.id}`)).json();
+    expect(persisted.title).toBe('Saved title');
+    expect(persisted.baseBranch).toBe(group.baseBranch);
+    expect(persisted.children.map((child: any) => ({
+      id: child.id, title: child.title, agentType: child.agentType, useWorktree: child.useWorktree,
+    }))).toEqual(group.children.map((child: any) => ({
+      id: child.id, title: child.title, agentType: child.agentType, useWorktree: child.useWorktree,
+    })));
+    await page.getByRole('button', { name: 'New Group' }).click();
+    await expect(page.locator('#group-repo-path')).toBeVisible();
+    await expect(page.getByPlaceholder('main', { exact: true })).toBeVisible();
+    await expect(page.getByPlaceholder('Task title', { exact: true })).toHaveCount(2);
+    await expect(page.getByRole('button', { name: 'Add Task' })).toBeVisible();
+    await expect(page.getByText('Auto-run — start agents immediately after creating')).toBeVisible();
+  });
+
   test('New Group button opens group creation dialog', async ({ page }) => {
     await page.goto('/projects/default');
     await page.getByRole('button', { name: 'New Group' }).click();
