@@ -464,7 +464,15 @@ test.describe('Task Groups UI', () => {
       await page.getByTitle('Edit group', { exact: true }).click();
       await expect(description).toHaveValue(expected);
       const persisted = await request.get(`${API}/api/groups/${group.id}`);
-      expect((await persisted.json()).description).toBe(expected);
+      expect(persisted.status()).toBe(200);
+      const persistedGroup = await persisted.json();
+      expect(persistedGroup.id).toBe(group.id);
+      // Repository readers omit an empty optional group description.
+      if (expected === '') {
+        expect(persistedGroup).not.toHaveProperty('description');
+      } else {
+        expect(persistedGroup.description).toBe(expected);
+      }
     });
   }
 
