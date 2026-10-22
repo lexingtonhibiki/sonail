@@ -431,6 +431,51 @@ test.describe('Task Groups UI', () => {
     createdGroupIds.length = 0;
   });
 
+  for (const [name, input, expected] of [
+    ['empty', '', ''],
+    ['whitespace', '   ', ''],
+    ['replacement', '  New description  ', 'New description'],
+  ]) {
+    test(`editing a group saves ${name} description after reload`, async ({ page, request }) => {
+      const response = await request.post(`${API}/api/groups`, {
+        data: {
+          title: `Edit description ${name}`,
+          description: 'Original description',
+          maxConcurrency: 1,
+          children: makeChildren(2),
+        },
+      });
+      expect(response.status()).toBe(201);
+      const group = await response.json();
+      createdGroupIds.push(group.id);
+
+      await page.goto('/projects/default');
+      await page.getByTitle('Edit group', { exact: true }).click();
+      const description = page.getByPlaceholder('Optional group description...');
+      await expect(description).toHaveValue('Original description');
+      await description.fill(input);
+      const saved = page.waitForResponse((res) =>
+        res.url().endsWith(`/api/groups/${group.id}`) && res.request().method() === 'PATCH');
+      await page.getByRole('button', { name: 'Save Changes' }).click();
+      expect((await saved).ok()).toBeTruthy();
+      await expect(page.getByRole('heading', { name: 'Edit Task Group' })).not.toBeVisible();
+
+      await page.reload();
+      await page.getByTitle('Edit group', { exact: true }).click();
+      await expect(description).toHaveValue(expected);
+      const persisted = await request.get(`${API}/api/groups/${group.id}`);
+      expect(persisted.status()).toBe(200);
+      const persistedGroup = await persisted.json();
+      expect(persistedGroup.id).toBe(group.id);
+      // Repository readers omit an empty optional group description.
+      if (expected === '') {
+        expect(persistedGroup).not.toHaveProperty('description');
+      } else {
+        expect(persistedGroup.description).toBe(expected);
+      }
+    });
+  }
+
   test('New Group button opens group creation dialog', async ({ page }) => {
     await page.goto('/projects/default');
     await page.getByRole('button', { name: 'New Group' }).click();
