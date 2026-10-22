@@ -129,9 +129,9 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
   async function handleSubmit() {
     if (!title.trim() || submitting) return;
 
-    // Client-side path validation
+    // Only creation submits a path; hidden edit-mode values must not block saving.
     const trimmedPath = (lockedRepoPath || repoPath).trim();
-    if (trimmedPath) {
+    if (!isEditMode && trimmedPath) {
       if (!isAbsoluteRepoPath(trimmedPath)) {
         setPathError('Path must be absolute (use /, ~, D:\\, or \\\\server\\share)');
         return;
@@ -247,7 +247,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
               </div>
 
               {/* Priority + Repo + Branch row */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className={isEditMode ? 'grid grid-cols-1 gap-3' : 'grid grid-cols-3 gap-3'}>
                 {/* Priority dropdown */}
                 <div className="relative">
                   <label className="mb-1 block text-sm font-medium text-muted-foreground">Priority</label>
@@ -274,6 +274,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
                   )}
                 </div>
 
+                {!isEditMode && (<>
                 {/* Local path */}
                 <div>
                   <label htmlFor="group-repo-path" className="mb-1 block text-sm font-medium text-muted-foreground">Local Path</label>
@@ -322,7 +323,15 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none"
                   />
                 </div>
+                </>)}
               </div>
+
+              {isEditMode && (
+                <p className="text-sm text-muted-foreground">
+                  Edit group details and parallelism here. Repository, base branch and task setup are creation-only in this dialog.
+                  <br />这里只修改任务组信息和并行数；仓库、基准分支和任务配置仅在创建时设置。
+                </p>
+              )}
 
               {/* Parallelism slider */}
               <div>
@@ -330,6 +339,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
                 <ParallelismSlider value={maxConcurrency} max={children.length} onChange={setMaxConcurrency} />
               </div>
 
+              {!isEditMode && (<>
               {/* Children */}
               <div>
                 <label className="mb-2 block text-sm font-medium text-muted-foreground">Tasks ({children.length})</label>
@@ -423,6 +433,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
                   </p>
                 </div>
               )}
+              </>)}
             </div>
 
             {/* Footer */}
