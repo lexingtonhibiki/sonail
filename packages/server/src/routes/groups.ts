@@ -416,6 +416,9 @@ export function createGroupsRouter(
     const id = paramId(req);
     const group = await groupRepo.getById(id);
     if (!group) { res.status(404).json({ error: 'group not found' }); return; }
+    if (!group.archived) {
+      res.status(400).json({ error: 'group is not archived' }); return;
+    }
 
     const children = await groupRepo.getChildTasks(id);
     for (const child of children) {
