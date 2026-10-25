@@ -47,7 +47,14 @@ function leafNameFromUrl(value: string): string {
   return cleaned.split(/[\\/:]/).filter(Boolean).pop() ?? '';
 }
 
-export function ProjectDialog({
+export function ProjectDialog(props: ProjectDialogProps) {
+  if (!props.open) return null;
+  // A closed or replaced dialog must not share state with outstanding callbacks.
+  const sessionKey = JSON.stringify([props.project?.id ?? null, props.initialValues ?? null]);
+  return <ProjectDialogSession key={sessionKey} {...props} />;
+}
+
+function ProjectDialogSession({
   open,
   project,
   initialValues,
@@ -56,6 +63,11 @@ export function ProjectDialog({
   onValidatePath,
   onSelectDirectory,
 }: ProjectDialogProps) {
+  const activeSession = useRef(false);
+  useEffect(() => {
+    activeSession.current = true;
+    return () => { activeSession.current = false; };
+  }, []);
   const mode = project ? 'edit' : 'create';
   const [sourceType, setSourceType] = useState<'local' | 'repo'>('local');
   const [name, setName] = useState('');
@@ -109,6 +121,7 @@ export function ProjectDialog({
 
     setPathStatus({ kind: 'validating' });
     const result = await onValidatePath(trimmedPath);
+    if (!activeSession.current) return false;
     if (!result) {
       setPathStatus({ kind: 'invalid', message: 'Could not validate Local Path' });
       return false;
@@ -154,6 +167,7 @@ export function ProjectDialog({
     try {
       if (!usingRepo) {
         const pathValid = await validatePath(trimmedPath);
+        if (!activeSession.current) return;
         if (!pathValid) {
           setError('Fix the Local Path before saving');
           return;
@@ -199,11 +213,11 @@ export function ProjectDialog({
       }
 
       const result = await onSubmit(payload);
-      if (result === undefined) return;
+      if (!activeSession.current || result === undefined) return;
       onClose();
     } finally {
       submissionInFlight.current = false;
-      setSubmitting(false);
+      if (activeSession.current) setSubmitting(false);
     }
   }
 
@@ -236,12 +250,13 @@ export function ProjectDialog({
     setError('');
     try {
       const selected = await onSelectDirectory(repoPath.trim() || undefined);
+      if (!activeSession.current) return;
       if (selected === undefined || selected === null) return;
       setRepoPath(selected);
       if (mode === 'create' && !nameTouched) setName(leafNameFromPath(selected));
       await validatePath(selected);
     } finally {
-      setSelectingDirectory(false);
+      if (activeSession.current) setSelectingDirectory(false);
     }
   }
 
