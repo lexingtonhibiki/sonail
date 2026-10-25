@@ -46,7 +46,13 @@ test.describe('attachment loads belong to the current dialog session', () => {
           headers.set('x-test-attachment-session', String((window as Window & { attachmentTestSession?: number }).attachmentTestSession));
           return originalFetch(new Request(request, { headers }));
         }
-        return originalFetch(request);
+        return originalFetch(request).then(response => {
+          if (request.method === 'DELETE' && response.status === 204) {
+            const state = window as Window & { attachmentTestCompletedDeletes?: string[] };
+            (state.attachmentTestCompletedDeletes ??= []).push(request.url);
+          }
+          return response;
+        });
       };
     });
     await page.goto('/projects/default');
@@ -54,6 +60,10 @@ test.describe('attachment loads belong to the current dialog session', () => {
   });
 
   test.afterEach(async ({ page, request }) => {
+    // A failed test must not release a held mutation to the real server when
+    // removing routes. Completed routes can already be handled or closed.
+    const held = [...pending.flatMap(load => load.routes), ...uploads, ...deletions];
+    await Promise.all(held.map(route => route.abort().catch(() => {})));
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     for (const task of tasks) await request.delete(`${API}/api/tasks/${task.id}`);
   });
@@ -120,9 +130,18 @@ test.describe('attachment loads belong to the current dialog session', () => {
   });
 
   async function finishMutation(page: Page, route: Route, json?: ReturnType<typeof image>[]) {
-    const completed = page.waitForEvent('requestfinished', request => request === route.request());
-    await route.fulfill(json ? { json } : { status: 204 });
-    await completed;
+    if (json) {
+      const completed = page.waitForEvent('requestfinished', request => request === route.request());
+      await route.fulfill({ json });
+      await completed;
+    } else {
+      await route.fulfill({ status: 204 });
+      // Chromium may report an unread 204 body as ERR_ABORTED rather than emit
+      // requestfinished. Require the browser fetch promise to resolve with 204.
+      await page.waitForFunction(url =>
+        (window as Window & { attachmentTestCompletedDeletes?: string[] }).attachmentTestCompletedDeletes?.includes(url),
+      route.request().url());
+    }
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   }
 
