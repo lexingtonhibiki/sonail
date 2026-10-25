@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, type Dispatch, type SetStateAction } from 'react';
 import type { TaskAttachment } from '@/types';
 import { api } from '@/lib/api';
 
@@ -19,7 +19,7 @@ interface ImageUploadProps {
   /** Called when pending files change (create mode, no taskId yet) */
   onPendingChange?: (files: File[]) => void;
   /** Called after a server-side upload or delete */
-  onAttachmentsChange?: (attachments: TaskAttachment[]) => void;
+  onAttachmentsChange?: Dispatch<SetStateAction<TaskAttachment[]>>;
 }
 
 export default function ImageUpload({ taskId, existing = [], onPendingChange, onAttachmentsChange }: ImageUploadProps) {
@@ -61,7 +61,7 @@ export default function ImageUpload({ taskId, existing = [], onPendingChange, on
       setUploading(true);
       try {
         const uploaded = await api.uploadAttachments(taskId, valid);
-        onAttachmentsChange?.([...existing, ...uploaded]);
+        onAttachmentsChange?.(current => [...current, ...uploaded]);
       } catch (e: any) {
         setError(e.message || 'Upload failed');
       } finally {
@@ -77,7 +77,7 @@ export default function ImageUpload({ taskId, existing = [], onPendingChange, on
       setPending(updated);
       onPendingChange?.(updated.map(p => p.file));
     }
-  }, [taskId, existing, pending, validateFiles, onAttachmentsChange, onPendingChange]);
+  }, [taskId, pending, validateFiles, onAttachmentsChange, onPendingChange]);
 
   const removePending = useCallback((index: number) => {
     URL.revokeObjectURL(pending[index].preview);
@@ -89,11 +89,11 @@ export default function ImageUpload({ taskId, existing = [], onPendingChange, on
   const removeExisting = useCallback(async (attachment: TaskAttachment) => {
     try {
       await api.deleteAttachment(attachment.id);
-      onAttachmentsChange?.(existing.filter(a => a.id !== attachment.id));
+      onAttachmentsChange?.(current => current.filter(a => a.id !== attachment.id));
     } catch (e: any) {
       setError(e.message || 'Delete failed');
     }
-  }, [existing, onAttachmentsChange]);
+  }, [onAttachmentsChange]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
