@@ -65,6 +65,9 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
 
   // Pre-populate fields when editing
   useEffect(() => {
+    let cancelled = false;
+    // Do not display another session's images while its request is pending.
+    setExistingAttachments([]);
     if (editTask && open) {
       setTitle(editTask.title);
       setDescription(editTask.description);
@@ -75,8 +78,13 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
       setBaseBranch(editTask.baseBranch || 'main');
       setUseWorktree(editTask.useWorktree ?? false);
       setTimeoutMinutes(editTask.timeoutMinutes?.toString() ?? '');
-      // Load attachments from server
-      api.getAttachments(editTask.id).then(setExistingAttachments).catch(() => setExistingAttachments([]));
+      api.getAttachments(editTask.id)
+        .then((attachments) => {
+          if (!cancelled) setExistingAttachments(attachments);
+        })
+        .catch(() => {
+          if (!cancelled) setExistingAttachments([]);
+        });
       // Highlight missing path if opened via Play button
       if (highlightRequired && !editTask.repoPath) {
         setPathError('Local path is required to run the agent');
@@ -104,8 +112,10 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
       setSubmitting(false);
       setPathError('');
       setPendingImages([]);
-      setExistingAttachments([]);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [editTask, open, highlightRequired, lockedRepoPath, defaultAgent, defaultPriority, defaultBaseBranch, defaultUseWorktree]);
 
   useEffect(() => {
