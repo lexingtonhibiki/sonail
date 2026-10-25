@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Trash2, ChevronDown, AlertTriangle } from 'lucide-react';
 import type { AgentType, Priority } from '@/types';
@@ -51,7 +51,18 @@ function makeRow(agentType: AgentType = 'copilot', useWorktree = true): ChildRow
   return { key: `child-${nextKey++}`, title: '', description: '', agentType, useWorktree };
 }
 
-export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubmit, lockedRepoPath, projectDefaults }: TaskGroupDialogProps) {
+export function TaskGroupDialog(props: TaskGroupDialogProps) {
+  if (!props.open) return null;
+  const sessionKey = JSON.stringify([props.editGroup?.id ?? null, props.lockedRepoPath ?? null]);
+  return <TaskGroupDialogSession key={sessionKey} {...props} />;
+}
+
+function TaskGroupDialogSession({ open, onClose, onSubmit, editGroup, onEditSubmit, lockedRepoPath, projectDefaults }: TaskGroupDialogProps) {
+  const activeSession = useRef(false);
+  useEffect(() => {
+    activeSession.current = true;
+    return () => { activeSession.current = false; };
+  }, []);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
@@ -126,7 +137,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
   const repoPathPlaceholder = getRepoPathPlaceholder();
   const repoPathHelpText = getRepoPathHelpText();
 
-  async function handleSubmit() {
+  async function handleSubmit(shouldAutoRun = autoRun) {
     if (!title.trim() || submitting) return;
 
     // Client-side path validation
@@ -148,7 +159,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
           priority,
           maxConcurrency,
         });
-        if (result === undefined) return;
+        if (!activeSession.current || result === undefined) return;
         onClose();
         return;
       }
@@ -169,12 +180,12 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
           agentType: c.agentType,
           useWorktree: c.useWorktree,
         })),
-        autoRun,
+        autoRun: shouldAutoRun,
       });
-      if (result === undefined) return;
+      if (!activeSession.current || result === undefined) return;
       onClose();
     } finally {
-      setSubmitting(false);
+      if (activeSession.current) setSubmitting(false);
     }
   }
 
@@ -435,7 +446,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
               </button>
               {isEditMode ? (
                 <button
-                  onClick={handleSubmit}
+                  onClick={() => handleSubmit()}
                   disabled={!title.trim() || submitting}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
@@ -444,14 +455,14 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
               ) : (
                 <>
                   <button
-                    onClick={() => { setAutoRun(false); handleSubmit(); }}
+                    onClick={() => { setAutoRun(false); handleSubmit(false); }}
                     disabled={!title.trim() || children.some((c) => !c.title.trim()) || submitting}
                     className="rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {submitting ? 'Creating…' : 'Create Group'}
                   </button>
                   <button
-                    onClick={() => { setAutoRun(true); handleSubmit(); }}
+                    onClick={() => { setAutoRun(true); handleSubmit(true); }}
                     disabled={!title.trim() || children.some((c) => !c.title.trim()) || submitting}
                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
