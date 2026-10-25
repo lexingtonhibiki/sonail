@@ -126,7 +126,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
   const repoPathPlaceholder = getRepoPathPlaceholder();
   const repoPathHelpText = getRepoPathHelpText();
 
-  async function handleSubmit() {
+  async function handleSubmit(shouldAutoRun = autoRun) {
     if (!title.trim() || submitting) return;
 
     // Client-side path validation
@@ -169,7 +169,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
           agentType: c.agentType,
           useWorktree: c.useWorktree,
         })),
-        autoRun,
+        autoRun: shouldAutoRun,
       });
       if (result === undefined) return;
       onClose();
@@ -435,7 +435,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
               </button>
               {isEditMode ? (
                 <button
-                  onClick={handleSubmit}
+                  onClick={() => handleSubmit()}
                   disabled={!title.trim() || submitting}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
@@ -444,14 +444,14 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
               ) : (
                 <>
                   <button
-                    onClick={() => { setAutoRun(false); handleSubmit(); }}
+                    onClick={() => { setAutoRun(false); handleSubmit(false); }}
                     disabled={!title.trim() || children.some((c) => !c.title.trim()) || submitting}
                     className="rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {submitting ? 'Creating…' : 'Create Group'}
                   </button>
                   <button
-                    onClick={() => { setAutoRun(true); handleSubmit(); }}
+                    onClick={() => { setAutoRun(true); handleSubmit(true); }}
                     disabled={!title.trim() || children.some((c) => !c.title.trim()) || submitting}
                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
