@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FolderOpen, Github, HardDrive, X } from 'lucide-react';
 import { isAbsoluteRepoPath, getRepoPathHelpText, getRepoPathPlaceholder } from '@/lib/utils';
@@ -69,6 +69,7 @@ export function ProjectDialog({
   const [error, setError] = useState('');
   const [pathStatus, setPathStatus] = useState<PathStatus>({ kind: 'idle' });
   const [submitting, setSubmitting] = useState(false);
+  const submissionInFlight = useRef(false);
   const [selectingDirectory, setSelectingDirectory] = useState(false);
   const [autoSubmitPending, setAutoSubmitPending] = useState(false);
 
@@ -124,7 +125,7 @@ export function ProjectDialog({
 
   async function handleSubmit(e?: FormEvent) {
     e?.preventDefault();
-    if (submitting) return;
+    if (submissionInFlight.current) return;
 
     const trimmedName = name.trim();
     const trimmedPath = repoPath.trim();
@@ -146,17 +147,19 @@ export function ProjectDialog({
       return;
     }
 
-    if (!usingRepo) {
-      const pathValid = await validatePath(trimmedPath);
-      if (!pathValid) {
-        setError('Fix the Local Path before saving');
-        return;
-      }
-    }
-
+    // Validation is asynchronous too: reserve this submission before its first await.
+    submissionInFlight.current = true;
     setSubmitting(true);
     setError('');
     try {
+      if (!usingRepo) {
+        const pathValid = await validatePath(trimmedPath);
+        if (!pathValid) {
+          setError('Fix the Local Path before saving');
+          return;
+        }
+      }
+
       const trimmedBaseBranch = defaultBaseBranch.trim();
       const worktreeValue = defaultUseWorktree === 'inherit' ? undefined : defaultUseWorktree === 'true';
       const defaults = mode === 'edit'
@@ -199,6 +202,7 @@ export function ProjectDialog({
       if (result === undefined) return;
       onClose();
     } finally {
+      submissionInFlight.current = false;
       setSubmitting(false);
     }
   }
