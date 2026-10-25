@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { spawnSync } from 'child_process';
+import { execFile, type ExecFileException } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -210,7 +210,7 @@ export function createProjectsRouter(
       ? expandTilde(req.body.initialPath.trim())
       : undefined;
     try {
-      const selected = selectDirectory(initialPath);
+      const selected = await selectDirectory(initialPath);
       res.json({ repoPath: selected });
     } catch (err: unknown) {
       res.status(501).json({ error: errorMessage(err) });
@@ -461,13 +461,30 @@ function isRepoPathChange(existing: string | undefined, next: string | null): bo
   return normalizeRepoPathForCompare(existing) !== normalizeRepoPathForCompare(next);
 }
 
-function selectDirectory(initialPath?: string): string | null {
+// A native picker stays open until the user responds. Never wait synchronously:
+// doing so would suspend every API request and agent event on this server.
+function runDirectoryPicker(command: string, args: string[], options: { encoding: 'utf8'; env?: NodeJS.ProcessEnv }): Promise<{
+  status: number | null; stdout: string; stderr: string; error?: ExecFileException;
+}> {
+  return new Promise((resolve) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      resolve({
+        status: error ? (typeof error.code === 'number' ? error.code : null) : 0,
+        stdout,
+        stderr,
+        error: error && typeof error.code === 'string' ? error : undefined,
+      });
+    });
+  });
+}
+
+async function selectDirectory(initialPath?: string): Promise<string | null> {
   if (process.platform === 'win32') return selectDirectoryWindows(initialPath);
   if (process.platform === 'darwin') return selectDirectoryMac();
   return selectDirectoryLinux(initialPath);
 }
 
-function selectDirectoryWindows(initialPath?: string): string | null {
+async function selectDirectoryWindows(initialPath?: string): Promise<string | null> {
   const script = `
 Add-Type -AssemblyName System.Windows.Forms
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
@@ -483,7 +500,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 exit 2
 `;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+  const result = await runDirectoryPicker('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script], {
     encoding: 'utf8',
     env: { ...process.env, AI_AGENT_BOARD_INITIAL_DIR: initialPath ?? '' },
   });
@@ -492,8 +509,8 @@ exit 2
   throw new Error(`Folder picker failed: ${result.stderr.trim() || result.error?.message || `exit ${result.status}`}`);
 }
 
-function selectDirectoryMac(): string | null {
-  const result = spawnSync('osascript', ['-e', 'POSIX path of (choose folder with prompt "Select project folder")'], {
+async function selectDirectoryMac(): Promise<string | null> {
+  const result = await runDirectoryPicker('osascript', ['-e', 'POSIX path of (choose folder with prompt "Select project folder")'], {
     encoding: 'utf8',
   });
   if (result.status === 0) return result.stdout.trim() || null;
@@ -501,13 +518,13 @@ function selectDirectoryMac(): string | null {
   throw new Error(`Folder picker failed: ${result.stderr.trim() || result.error?.message || `exit ${result.status}`}`);
 }
 
-function selectDirectoryLinux(initialPath?: string): string | null {
+async function selectDirectoryLinux(initialPath?: string): Promise<string | null> {
   const commands: Array<{ command: string; args: string[] }> = [
     { command: 'zenity', args: ['--file-selection', '--directory', '--title=Select project folder'] },
     { command: 'kdialog', args: ['--getexistingdirectory', initialPath ?? '.'] },
   ];
   for (const { command, args } of commands) {
-    const result = spawnSync(command, args, { encoding: 'utf8' });
+    const result = await runDirectoryPicker(command, args, { encoding: 'utf8' });
     if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') continue;
     if (result.status === 0) return result.stdout.trim() || null;
     if (result.status === 1) return null;
