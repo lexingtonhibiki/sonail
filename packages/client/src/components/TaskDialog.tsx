@@ -4,13 +4,14 @@ import {
   X,
   ChevronDown,
 } from 'lucide-react';
-import type { Task, TaskAttachment, ColumnId, AgentType, AgentInfo, Priority } from '@/types';
+import type { Task, ColumnId, AgentType, AgentInfo, Priority } from '@/types';
 import { AGENT_OPTIONS } from '@/lib/agent-config';
 import { PRIORITY_OPTIONS } from '@/lib/priority-config';
 import { cn, getRepoPathHelpText, getRepoPathPlaceholder, isAbsoluteRepoPath, slugify } from '@/lib/utils';
 import { getRecentRepoPaths, addRepoPath } from '@/lib/repo-history';
 import { api } from '@/lib/api';
 import ImageUpload from './ImageUpload';
+import TaskAttachments from './TaskAttachments';
 
 interface TaskDialogProps {
   open: boolean;
@@ -52,7 +53,7 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
   const [submitting, setSubmitting] = useState(false);
   const [pathError, setPathError] = useState('');
   const [pendingImages, setPendingImages] = useState<File[]>([]);
-  const [existingAttachments, setExistingAttachments] = useState<TaskAttachment[]>([]);
+  const [attachmentSession, setAttachmentSession] = useState(0);
   const [availableAgents, setAvailableAgents] = useState<AgentInfo[]>([]);
 
   const isEditMode = !!editTask;
@@ -75,8 +76,6 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
       setBaseBranch(editTask.baseBranch || 'main');
       setUseWorktree(editTask.useWorktree ?? false);
       setTimeoutMinutes(editTask.timeoutMinutes?.toString() ?? '');
-      // Load attachments from server
-      api.getAttachments(editTask.id).then(setExistingAttachments).catch(() => setExistingAttachments([]));
       // Highlight missing path if opened via Play button
       if (highlightRequired && !editTask.repoPath) {
         setPathError('Local path is required to run the agent');
@@ -88,7 +87,9 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
       setBaseBranch(defaultBaseBranch);
       setUseWorktree(defaultUseWorktree);
     } else if (!open) {
-      // Reset when dialog closes
+      // Reset when dialog closes. A new key also isolates a rapid reopen while
+      // AnimatePresence still retains the exiting attachment component.
+      setAttachmentSession(session => session + 1);
       setTitle('');
       setDescription('');
       setPriority('medium');
@@ -104,7 +105,6 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
       setSubmitting(false);
       setPathError('');
       setPendingImages([]);
-      setExistingAttachments([]);
     }
   }, [editTask, open, highlightRequired, lockedRepoPath, defaultAgent, defaultPriority, defaultBaseBranch, defaultUseWorktree]);
 
@@ -216,7 +216,6 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
       setUseWorktree(defaultUseWorktree);
       setTimeoutMinutes('');
       setPendingImages([]);
-      setExistingAttachments([]);
       onClose();
     } finally {
       setSubmitting(false);
@@ -317,12 +316,11 @@ export function TaskDialog({ open, onClose, onSubmit, editTask, onEditSubmit, hi
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   Images
                 </label>
-                <ImageUpload
-                  taskId={isEditMode ? editTask!.id : undefined}
-                  existing={existingAttachments}
-                  onPendingChange={setPendingImages}
-                  onAttachmentsChange={setExistingAttachments}
-                />
+                {editTask ? (
+                  <TaskAttachments key={`${editTask.id}:${attachmentSession}`} taskId={editTask.id} />
+                ) : (
+                  <ImageUpload onPendingChange={setPendingImages} />
+                )}
               </div>
 
               {/* Priority */}
