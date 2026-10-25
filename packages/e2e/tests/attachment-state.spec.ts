@@ -31,7 +31,8 @@ test.describe('attachment state during overlapping requests', () => {
     });
     await page.goto('/projects/default');
     await waitForBoard(page);
-    const card = page.locator('.group').filter({ has: page.getByRole('heading', { name: task.title, exact: true }) });
+    const card = page.locator('.group').filter({ has: page.getByRole('heading', { name: task.title }) });
+    await expect(card).toHaveCount(1);
     await card.hover();
     await card.getByRole('button', { name: 'Edit task' }).click();
     await expect(page.getByRole('img', { name: 'a.png', exact: true })).toBeVisible();
