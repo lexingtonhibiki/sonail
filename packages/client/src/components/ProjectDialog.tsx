@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FolderOpen, Github, HardDrive, X } from 'lucide-react';
 import { isAbsoluteRepoPath, getRepoPathHelpText, getRepoPathPlaceholder } from '@/lib/utils';
@@ -47,7 +47,14 @@ function leafNameFromUrl(value: string): string {
   return cleaned.split(/[\\/:]/).filter(Boolean).pop() ?? '';
 }
 
-export function ProjectDialog({
+export function ProjectDialog(props: ProjectDialogProps) {
+  if (!props.open) return null;
+  // A closed or replaced dialog must not share state with outstanding callbacks.
+  const sessionKey = JSON.stringify([props.project?.id ?? null, props.initialValues ?? null]);
+  return <ProjectDialogSession key={sessionKey} {...props} />;
+}
+
+function ProjectDialogSession({
   open,
   project,
   initialValues,
@@ -56,6 +63,11 @@ export function ProjectDialog({
   onValidatePath,
   onSelectDirectory,
 }: ProjectDialogProps) {
+  const activeSession = useRef(false);
+  useEffect(() => {
+    activeSession.current = true;
+    return () => { activeSession.current = false; };
+  }, []);
   const mode = project ? 'edit' : 'create';
   const [sourceType, setSourceType] = useState<'local' | 'repo'>('local');
   const [name, setName] = useState('');
@@ -69,6 +81,7 @@ export function ProjectDialog({
   const [error, setError] = useState('');
   const [pathStatus, setPathStatus] = useState<PathStatus>({ kind: 'idle' });
   const [submitting, setSubmitting] = useState(false);
+  const submissionInFlight = useRef(false);
   const [selectingDirectory, setSelectingDirectory] = useState(false);
   const [autoSubmitPending, setAutoSubmitPending] = useState(false);
 
@@ -108,6 +121,7 @@ export function ProjectDialog({
 
     setPathStatus({ kind: 'validating' });
     const result = await onValidatePath(trimmedPath);
+    if (!activeSession.current) return false;
     if (!result) {
       setPathStatus({ kind: 'invalid', message: 'Could not validate Local Path' });
       return false;
@@ -124,7 +138,7 @@ export function ProjectDialog({
 
   async function handleSubmit(e?: FormEvent) {
     e?.preventDefault();
-    if (submitting) return;
+    if (submissionInFlight.current) return;
 
     const trimmedName = name.trim();
     const trimmedPath = repoPath.trim();
@@ -146,17 +160,20 @@ export function ProjectDialog({
       return;
     }
 
-    if (!usingRepo) {
-      const pathValid = await validatePath(trimmedPath);
-      if (!pathValid) {
-        setError('Fix the Local Path before saving');
-        return;
-      }
-    }
-
+    // Validation is asynchronous too: reserve this submission before its first await.
+    submissionInFlight.current = true;
     setSubmitting(true);
     setError('');
     try {
+      if (!usingRepo) {
+        const pathValid = await validatePath(trimmedPath);
+        if (!activeSession.current) return;
+        if (!pathValid) {
+          setError('Fix the Local Path before saving');
+          return;
+        }
+      }
+
       const trimmedBaseBranch = defaultBaseBranch.trim();
       const worktreeValue = defaultUseWorktree === 'inherit' ? undefined : defaultUseWorktree === 'true';
       const defaults = mode === 'edit'
@@ -196,10 +213,11 @@ export function ProjectDialog({
       }
 
       const result = await onSubmit(payload);
-      if (result === undefined) return;
+      if (!activeSession.current || result === undefined) return;
       onClose();
     } finally {
-      setSubmitting(false);
+      submissionInFlight.current = false;
+      if (activeSession.current) setSubmitting(false);
     }
   }
 
@@ -232,12 +250,13 @@ export function ProjectDialog({
     setError('');
     try {
       const selected = await onSelectDirectory(repoPath.trim() || undefined);
+      if (!activeSession.current) return;
       if (selected === undefined || selected === null) return;
       setRepoPath(selected);
       if (mode === 'create' && !nameTouched) setName(leafNameFromPath(selected));
       await validatePath(selected);
     } finally {
-      setSelectingDirectory(false);
+      if (activeSession.current) setSelectingDirectory(false);
     }
   }
 
