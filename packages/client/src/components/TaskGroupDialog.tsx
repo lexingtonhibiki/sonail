@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Trash2, ChevronDown, AlertTriangle } from 'lucide-react';
 import type { AgentType, Priority } from '@/types';
@@ -51,7 +51,18 @@ function makeRow(agentType: AgentType = 'copilot', useWorktree = true): ChildRow
   return { key: `child-${nextKey++}`, title: '', description: '', agentType, useWorktree };
 }
 
-export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubmit, lockedRepoPath, projectDefaults }: TaskGroupDialogProps) {
+export function TaskGroupDialog(props: TaskGroupDialogProps) {
+  if (!props.open) return null;
+  const sessionKey = JSON.stringify([props.editGroup?.id ?? null, props.lockedRepoPath ?? null]);
+  return <TaskGroupDialogSession key={sessionKey} {...props} />;
+}
+
+function TaskGroupDialogSession({ open, onClose, onSubmit, editGroup, onEditSubmit, lockedRepoPath, projectDefaults }: TaskGroupDialogProps) {
+  const activeSession = useRef(false);
+  useEffect(() => {
+    activeSession.current = true;
+    return () => { activeSession.current = false; };
+  }, []);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
@@ -148,7 +159,7 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
           priority,
           maxConcurrency,
         });
-        if (result === undefined) return;
+        if (!activeSession.current || result === undefined) return;
         onClose();
         return;
       }
@@ -171,10 +182,10 @@ export function TaskGroupDialog({ open, onClose, onSubmit, editGroup, onEditSubm
         })),
         autoRun: shouldAutoRun,
       });
-      if (result === undefined) return;
+      if (!activeSession.current || result === undefined) return;
       onClose();
     } finally {
-      setSubmitting(false);
+      if (activeSession.current) setSubmitting(false);
     }
   }
 
