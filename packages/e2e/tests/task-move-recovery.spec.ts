@@ -6,6 +6,10 @@ async function dragToReview(page: Page, title: string) {
     has: page.getByRole('heading', { name: title }),
   });
   await card.scrollIntoViewIfNeeded();
+  // dnd-kit hides the original card while its drop overlay animates back.
+  // Wait for the actual card to receive pointer input before a second drag.
+  await expect(card).toHaveCSS('opacity', '1');
+  await card.hover();
   const source = await card.boundingBox();
   const target = await page.locator('[data-column="review"]').boundingBox();
   expect(source).not.toBeNull();
