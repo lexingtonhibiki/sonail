@@ -93,7 +93,7 @@ export function Board({
     if (columnId === 'archived') {
       return tasks.filter(t => t.archived === true);
     }
-    return getTasksByColumn(columnId as ColumnId);
+    return getTasksByColumn(columnId as ColumnId).filter(task => !task.archived);
   }, [tasks, getTasksByColumn]);
 
   const getGroupsForColumn = useCallback((columnId: ColumnId | string) => {
