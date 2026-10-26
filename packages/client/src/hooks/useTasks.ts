@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Task, AgentType, ColumnId } from '@/types';
 import { VALID_TRANSITIONS } from '@/types';
 import { api, connectWS } from '@/lib/api';
@@ -9,6 +9,7 @@ export function useTasks(projectId = 'default') {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const pendingMoves = useRef(new Set<string>());
 
   // Fetch tasks on mount and when showArchived changes
   useEffect(() => {
@@ -67,25 +68,12 @@ export function useTasks(projectId = 'default') {
   }, []);
 
   const moveTask = useCallback((taskId: string, targetColumn: ColumnId) => {
-    setTasks((prev) => {
-      const task = prev.find((t) => t.id === taskId);
-      if (!task) return prev;
-      // Block invalid transitions
-      if (!VALID_TRANSITIONS[task.columnId]?.includes(targetColumn)) return prev;
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || pendingMoves.current.has(taskId) || !VALID_TRANSITIONS[task.columnId]?.includes(targetColumn)) return;
+    pendingMoves.current.add(taskId);
 
-      return prev.map((t) => {
-        if (t.id !== taskId) return t;
-        const updates: Partial<Task> = { columnId: targetColumn };
-        // Reset agent state when moving to in-progress
-        if (targetColumn === 'in-progress') {
-          updates.agentStatus = 'idle';
-          updates.startedAt = undefined;
-          updates.completedAt = undefined;
-        }
-        return { ...t, ...updates };
-      });
-    });
-    // Sync to server (server also validates + resets)
+    // Keep the last confirmed state until the server accepts the move. A failed
+    // request may also prevent a refresh, leaving an optimistic move stuck.
     api.updateTask(taskId, { columnId: targetColumn })
       .then((updated) => {
         setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
@@ -96,13 +84,9 @@ export function useTasks(projectId = 'default') {
       .catch((err) => {
         console.error('[moveTask] server rejected:', err);
         setError(`Move failed: ${err.message}`);
-        // Revert optimistic update by re-fetching
-        api.getTasks(showArchived, projectId).then(setTasks).catch((fetchErr) => {
-          console.error('[moveTask] re-fetch also failed:', fetchErr);
-          setError(`Move failed and could not refresh: ${fetchErr.message}`);
-        });
-      });
-  }, [showArchived, projectId, runTask]);
+      })
+      .finally(() => pendingMoves.current.delete(taskId));
+  }, [tasks, runTask]);
 
   const configureAndRunTask = useCallback(async (
     id: string,
