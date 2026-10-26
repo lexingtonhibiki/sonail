@@ -28,21 +28,22 @@ for (const fixture of [
       await route.fulfill({ json: [] });
     });
     await page.goto(`/projects/${projectId}`);
+    // Task headings include a priority icon in their accessible name.
     const ordinary = page.locator(`[data-column="${fixture.columnId}"]`);
-    await expect(ordinary.getByRole('heading', { name: title, exact: true })).toBeVisible();
+    await expect(ordinary.getByRole('heading', { name: title })).toBeVisible();
     await ordinary.getByRole('button', { name: 'Archive task', exact: true }).click();
     // Regression: archive returns the same columnId; the hook retains the updated record.
-    await expect(ordinary.getByRole('heading', { name: title, exact: true })).toHaveCount(0);
+    await expect(ordinary.getByRole('heading', { name: title })).toHaveCount(0);
     await page.getByRole('button', { name: 'Show Archived', exact: true }).click();
     const archived = page.locator('[data-column="archived"]');
-    await expect(archived.getByRole('heading', { name: title, exact: true })).toBeVisible();
-    await expect(ordinary.getByRole('heading', { name: title, exact: true })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: title, exact: true })).toHaveCount(1);
+    await expect(archived.getByRole('heading', { name: title })).toBeVisible();
+    await expect(ordinary.getByRole('heading', { name: title })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: title })).toHaveCount(1);
     await archived.getByRole('button', { name: 'Unarchive task', exact: true }).click();
-    await expect(ordinary.getByRole('heading', { name: title, exact: true })).toBeVisible();
-    await expect(archived.getByRole('heading', { name: title, exact: true })).toHaveCount(0);
+    await expect(ordinary.getByRole('heading', { name: title })).toBeVisible();
+    await expect(archived.getByRole('heading', { name: title })).toHaveCount(0);
     await page.getByRole('button', { name: 'Hide Archived', exact: true }).click();
-    await expect(ordinary.getByRole('heading', { name: title, exact: true })).toBeVisible();
+    await expect(ordinary.getByRole('heading', { name: title })).toBeVisible();
     expect(writes).toEqual(['/api/tasks/archive-task/archive', '/api/tasks/archive-task/unarchive']);
   });
 }
