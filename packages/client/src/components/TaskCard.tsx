@@ -97,6 +97,8 @@ function TaskCardComponent({ task, onClick, onEdit, onDelete, onArchive, onUnarc
       style={style}
       {...attributes}
       {...listeners}
+      // Archiving disables dragging, not the card or its restore/delete actions.
+      aria-disabled={false}
       className={cn(
         // touch-manipulation keeps native pan/scroll gestures working; the
         // TouchSensor press-and-hold delay is what activates a card drag.

@@ -31,6 +31,10 @@ for (const fixture of [
     // Task headings include a priority icon in their accessible name.
     const ordinary = page.locator(`[data-column="${fixture.columnId}"]`);
     await expect(ordinary.getByRole('heading', { name: title })).toBeVisible();
+    const liveCard = ordinary.getByRole('button', { name: new RegExp(title) });
+    await expect(liveCard).toHaveAttribute('role', 'button');
+    await expect(liveCard).toHaveAttribute('tabindex', '0');
+    await expect(liveCard).toHaveAttribute('aria-disabled', 'false');
     await ordinary.getByRole('button', { name: 'Archive task', exact: true }).click();
     // Regression: archive returns the same columnId; the hook retains the updated record.
     await expect(ordinary.getByRole('heading', { name: title })).toHaveCount(0);
@@ -39,6 +43,8 @@ for (const fixture of [
     await expect(archived.getByRole('heading', { name: title })).toBeVisible();
     await expect(ordinary.getByRole('heading', { name: title })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: title })).toHaveCount(1);
+    await expect(archived.getByRole('button', { name: 'Unarchive task', exact: true })).toBeEnabled();
+    await expect(archived.getByRole('button', { name: 'Delete task', exact: true })).toBeEnabled();
     await archived.getByRole('button', { name: 'Unarchive task', exact: true }).click();
     await expect(ordinary.getByRole('heading', { name: title })).toBeVisible();
     await expect(archived.getByRole('heading', { name: title })).toHaveCount(0);
