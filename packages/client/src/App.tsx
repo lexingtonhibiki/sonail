@@ -604,6 +604,7 @@ export function App() {
 
   return (
     <BoardPage
+      key={selectedProject.id}
       project={selectedProject}
       theme={theme}
       toggleTheme={toggleTheme}
